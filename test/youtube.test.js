@@ -244,6 +244,7 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(html, /vendor\/motion\.js/);
   assert.match(main, /node_modules[\s\S]*motion[\s\S]*dist[\s\S]*motion\.js/);
   assert.match(css, /\.play-toggle\.is-buffering \.button-icon/);
+  assert.match(css, /\.pixel-popover \{[\s\S]*top: 2px;/);
   assert.doesNotMatch(css, /bufferSpinStep/);
   assert.match(renderer, /className = "button-icon"/);
   assert.match(renderer, /querySelector\("\.button-icon"\)/);
