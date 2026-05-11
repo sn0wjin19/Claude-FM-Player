@@ -13,6 +13,7 @@ let loginPopoverTimer;
 let isLoggedIn = false;
 let authNeedsRefresh = false;
 let bufferAnimation;
+let lastAudibleVolume = Number(volumeSlider.value) || 20;
 
 function renderIcons() {
   window.lucide?.createIcons({ icons: window.lucide.icons });
@@ -94,17 +95,22 @@ function setVolumeIcon() {
   const volume = Number(volumeSlider.value);
   const isMuted = volume === 0;
   setIcon(volumeIcon, isMuted ? "volume-x" : "volume-2");
-  volumeIcon.setAttribute("aria-label", isMuted ? "已静音" : "静音");
-  volumeIcon.title = isMuted ? "已静音" : "静音";
+  volumeIcon.setAttribute("aria-label", isMuted ? "恢复音量" : "静音");
+  volumeIcon.title = isMuted ? "恢复音量" : "静音";
 }
 
 function syncVolume() {
-  audio.volume = Number(volumeSlider.value) / 100;
+  const volume = Number(volumeSlider.value);
+  audio.volume = volume / 100;
+  if (volume > 0) {
+    lastAudibleVolume = volume;
+  }
   setVolumeIcon();
 }
 
-function muteVolume() {
-  volumeSlider.value = "0";
+function toggleVolumeMute() {
+  const volume = Number(volumeSlider.value);
+  volumeSlider.value = volume === 0 ? String(lastAudibleVolume || 20) : "0";
   syncVolume();
 }
 
@@ -281,7 +287,7 @@ audio.addEventListener("error", () => {
 });
 
 volumeSlider.addEventListener("input", syncVolume);
-volumeIcon.addEventListener("click", muteVolume);
+volumeIcon.addEventListener("click", toggleVolumeMute);
 loginButton.addEventListener("click", async () => {
   if (isLoggedIn && !authNeedsRefresh) {
     showLoggedInPopover();

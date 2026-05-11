@@ -298,10 +298,11 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /transform: \["rotate\(0deg\)", "rotate\(360deg\)"\]/);
   assert.match(renderer, /ease: "easeOut"/);
   assert.doesNotMatch(renderer, /times: \[0, 0\.62, 1\]/);
-  assert.match(renderer, /function muteVolume\(\)/);
-  assert.match(renderer, /volumeSlider\.value = "0"/);
-  assert.match(renderer, /volumeIcon\.addEventListener\("click", muteVolume\)/);
-  assert.match(renderer, /volumeIcon\.setAttribute\("aria-label", isMuted \? "已静音" : "静音"\)/);
+  assert.match(renderer, /lastAudibleVolume = Number\(volumeSlider\.value\) \|\| 20/);
+  assert.match(renderer, /function toggleVolumeMute\(\)/);
+  assert.match(renderer, /volumeSlider\.value = volume === 0 \? String\(lastAudibleVolume \|\| 20\) : "0"/);
+  assert.match(renderer, /volumeIcon\.addEventListener\("click", toggleVolumeMute\)/);
+  assert.match(renderer, /volumeIcon\.setAttribute\("aria-label", isMuted \? "恢复音量" : "静音"\)/);
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
