@@ -124,9 +124,20 @@ body {
 
 .volume-icon {
   align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
   display: inline-flex;
   flex: 0 0 auto;
+  height: 24px;
   justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.volume-icon:hover {
+  color: #1f1d1a;
 }
 
 .volume-icon svg {

@@ -1,70 +1,155 @@
 # Claude FM Player
 
-一个小巧的 Windows/Electron 桌面播放器，用来播放 Claude YouTube 频道的 Claude FM 直播音频。
+[简体中文](./README.zh-CN.md)
 
-## 功能
+![Platform](https://img.shields.io/badge/platform-Windows-blue)
+![Runtime](https://img.shields.io/badge/runtime-Electron-47848f)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-- 启动后自动请求 `https://www.youtube.com/@claude/live`，解析当前直播视频。
-- 只保留播放/暂停、音量条、YouTube 登录入口这些必要控件。
-- 播放时只拉取 YouTube 直播音频；暂停会断开当前音频流，再次播放会重新连接到直播的最新进度。
-- 默认音量 20%。
-- 缓冲中使用 Motion 动画显示“转一圈、停一下”的连接状态。
-- 登录图标使用独立 Chrome profile，不读取你的 Chrome Default profile。已登录时再次点击会显示提示，不会重复打开登录页。
-- Windows 打包使用 `assets/icon.png` 作为应用图标。
+A tiny Windows desktop player for the Claude FM YouTube live stream.
 
-## 开发运行
+Claude FM Player is intentionally small: one window, one stream, play/pause, a
+volume slider, and a YouTube login control when YouTube requires an
+authenticated session. It resolves the current Claude FM livestream at startup
+and plays the live audio directly, reconnecting to the latest live position
+whenever playback is resumed.
+
+## Highlights
+
+- Resolves the current Claude FM livestream from `https://www.youtube.com/@claude/live`.
+- Plays the YouTube livestream audio only, with no embedded browser playback UI.
+- Keeps the interface compact: play/pause, volume, status, and YouTube login.
+- Defaults to 20% volume for a gentler first launch.
+- Reconnects on resume so playback jumps to the latest live audio position.
+- Uses a dedicated Chrome profile for YouTube login instead of reading your
+  personal Chrome Default profile.
+- Supports a local Netscape-format `cookies.txt` fallback for advanced users.
+- Prefers YouTube AAC audio and streams it through ffmpeg without MP3
+  re-encoding.
+- Ships Windows installer and portable builds with the project icon from
+  `assets/icon.png`.
+
+## How It Works
+
+The app is an Electron shell around a small local audio service:
+
+1. The main process resolves the active Claude FM video ID.
+2. `yt-dlp` selects the best available audio stream, preferring AAC.
+3. `ffmpeg` remuxes the selected stream into browser-playable AAC over a local
+   `/audio.mp3` endpoint.
+4. The renderer uses a normal HTML audio element for playback and reconnects on
+   resume to stay close to the live edge.
+
+For packaged Windows builds, native binaries from `ffmpeg-static` and
+`yt-dlp-exec` are unpacked from Electron's ASAR archive before execution.
+
+## Requirements
+
+- Windows
+- Node.js and npm for development
+- Google Chrome for the in-app YouTube login flow
+
+The packaged app bundles Electron, ffmpeg, and yt-dlp. Chrome is only needed
+when YouTube asks for an authenticated session.
+
+## Getting Started
+
+Install dependencies and launch the development app:
 
 ```powershell
 npm install
 npm start
 ```
 
-## YouTube 登录和 Cookies
-
-如果 YouTube 要求登录校验，可以用两种方式：
-
-1. 点击应用里的用户图标，使用播放器专用 Chrome profile 登录 YouTube。未登录时会直接打开 YouTube 登录页；登录完成后，应用会读取这个专用 profile 的 YouTube cookies。
-2. 把 Netscape 格式的 `cookies.txt` 放在项目根目录。`cookies.txt` 已加入 `.gitignore`，不要提交到仓库。
-
-## 音频实现
-
-播放器会优先选择 YouTube 的 AAC 音频，并通过 ffmpeg 复制成浏览器可播放的 AAC 流，避免二次转成低码率 MP3。开发环境和打包版本会优先使用 `ffmpeg-static` 提供的 ffmpeg；也可以通过 `CLAUDE_FM_FFMPEG_PATH` 指定自定义 ffmpeg 路径。
-
-## 测试
+Run the test suite:
 
 ```powershell
 npm test
 ```
 
-## Windows 打包
+## YouTube Authentication
 
-生成未安装目录：
+YouTube can occasionally require login cookies before it will expose a playable
+audio stream. Claude FM Player supports two authentication paths.
+
+### Dedicated Chrome Profile
+
+Click the user icon in the app. The player opens a dedicated Chrome profile for
+YouTube login and exports only the cookies needed by the audio resolver. This
+profile is separate from your everyday Chrome Default profile.
+
+If playback fails because cookies are stale, the app invalidates the exported
+cookie file and asks you to refresh the login.
+
+### Local Cookies File
+
+Advanced users can place a Netscape-format `cookies.txt` file in the project
+root. The file is ignored by Git and should never be committed.
+
+## Building
+
+Create an unpacked Windows app directory:
 
 ```powershell
 npm run pack
 ```
 
-生成 Windows x64 安装包和 portable exe：
+Create the Windows x64 installer and portable executable:
 
 ```powershell
 npm run dist
 ```
 
-打包产物会输出到 `dist/`，该目录已加入 `.gitignore`。
+Build artifacts are written to `dist/`, which is intentionally ignored by Git.
 
-## 项目结构
+## Project Layout
 
 ```text
-assets/              应用图标
-src/main.js          Electron 主进程、本地静态服务、音频代理
-src/renderer.js      播放器 UI 交互
-src/audioStream.js   yt-dlp 和 ffmpeg 音频流
-src/chromeAuth.js    专用 Chrome profile 登录和 cookies 导出
-src/cookies.js       cookies.txt 解析
-src/youtube.js       Claude FM 直播地址解析
-test/                Node test 测试
+assets/              Application icon and build resources
+src/main.js          Electron main process, local server, IPC handlers
+src/renderer.js      Player UI and playback interactions
+src/audioStream.js   yt-dlp and ffmpeg audio pipeline
+src/chromeAuth.js    Dedicated Chrome profile login and cookie export
+src/cookies.js       cookies.txt parsing helpers
+src/youtube.js       Claude FM livestream resolution
+test/                Node test suite
 ```
+
+## Troubleshooting
+
+### Portable build asks me to log in even though development works
+
+Make sure you are running the latest portable build. The app uses a stable
+`claude-fm-player` auth profile so development and packaged builds read the same
+exported YouTube cookies.
+
+### Playback fails after a successful login
+
+YouTube cookies can expire or rotate. Click the user icon and refresh the login
+from the dedicated Chrome window. The player will discard stale exported cookies
+after an auth-related playback failure.
+
+### Audio quality sounds wrong
+
+The player prefers AAC and remuxes it with ffmpeg instead of re-encoding to MP3.
+If the stream still sounds degraded, it is usually caused by the source stream,
+temporary YouTube delivery behavior, or the selected live audio rendition.
+
+### Custom ffmpeg path
+
+Set `CLAUDE_FM_FFMPEG_PATH` to force the app to use a specific ffmpeg binary.
+
+## Security and Privacy
+
+- The app does not read your personal Chrome Default profile.
+- The dedicated Chrome profile is stored locally under the app auth directory.
+- Cookie exports are local files used only to let `yt-dlp` access the YouTube
+  audio stream.
+- `cookies.txt` is ignored by Git and should be treated as secret material.
 
 ## License
 
-本项目代码使用 MIT License。第三方依赖许可见 `THIRD_PARTY_NOTICES.md`。
+Claude FM Player is released under the [MIT License](./LICENSE).
+
+Third-party dependency notices are available in
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

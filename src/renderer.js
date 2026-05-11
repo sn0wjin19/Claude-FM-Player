@@ -92,12 +92,20 @@ function setIcon(target, iconName) {
 
 function setVolumeIcon() {
   const volume = Number(volumeSlider.value);
-  setIcon(volumeIcon, volume === 0 ? "volume-x" : "volume-2");
+  const isMuted = volume === 0;
+  setIcon(volumeIcon, isMuted ? "volume-x" : "volume-2");
+  volumeIcon.setAttribute("aria-label", isMuted ? "已静音" : "静音");
+  volumeIcon.title = isMuted ? "已静音" : "静音";
 }
 
 function syncVolume() {
   audio.volume = Number(volumeSlider.value) / 100;
   setVolumeIcon();
+}
+
+function muteVolume() {
+  volumeSlider.value = "0";
+  syncVolume();
 }
 
 function setLoginButton(nextIsLoggedIn) {
@@ -273,6 +281,7 @@ audio.addEventListener("error", () => {
 });
 
 volumeSlider.addEventListener("input", syncVolume);
+volumeIcon.addEventListener("click", muteVolume);
 loginButton.addEventListener("click", async () => {
   if (isLoggedIn && !authNeedsRefresh) {
     showLoggedInPopover();

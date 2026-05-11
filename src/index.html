@@ -24,10 +24,16 @@
         >
           <i data-lucide="loader-circle" aria-hidden="true"></i>
         </button>
-        <label class="volume-control" title="音量">
-          <span id="volumeIcon" class="volume-icon" aria-hidden="true">
+        <div class="volume-control" title="音量">
+          <button
+            id="volumeIcon"
+            class="volume-icon"
+            type="button"
+            aria-label="静音"
+            title="静音"
+          >
             <i data-lucide="volume-2"></i>
-          </span>
+          </button>
           <input
             id="volumeSlider"
             class="volume-slider"
@@ -37,7 +43,7 @@
             value="20"
             aria-label="音量"
           />
-        </label>
+        </div>
         <button
           id="loginButton"
           class="icon-button"

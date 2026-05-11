@@ -282,6 +282,8 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   const renderer = fs.readFileSync("src/renderer.js", "utf8");
 
   assert.match(html, /id="volumeSlider"[\s\S]*value="20"/);
+  assert.match(html, /id="volumeIcon"[\s\S]*type="button"/);
+  assert.match(html, /id="volumeIcon"[\s\S]*aria-label="静音"/);
   assert.match(html, /id="loginPopover"/);
   assert.match(html, /已登录 不用重复登录咯~/);
   assert.match(html, /style-src 'self' 'unsafe-inline'/);
@@ -296,6 +298,10 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /transform: \["rotate\(0deg\)", "rotate\(360deg\)"\]/);
   assert.match(renderer, /ease: "easeOut"/);
   assert.doesNotMatch(renderer, /times: \[0, 0\.62, 1\]/);
+  assert.match(renderer, /function muteVolume\(\)/);
+  assert.match(renderer, /volumeSlider\.value = "0"/);
+  assert.match(renderer, /volumeIcon\.addEventListener\("click", muteVolume\)/);
+  assert.match(renderer, /volumeIcon\.setAttribute\("aria-label", isMuted \? "已静音" : "静音"\)/);
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
