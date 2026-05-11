@@ -123,6 +123,7 @@ function setLoginButton(nextIsLoggedIn) {
 
 function markAuthNeedsRefresh() {
   authNeedsRefresh = true;
+  invalidateStoredAuth();
   setLoginButton(false);
 }
 
@@ -139,7 +140,7 @@ async function updateAuthStatus({ clearRefresh = false, refresh = false } = {}) 
     const status = refresh
       ? await window.claudeFm.refreshAuthStatus()
       : await window.claudeFm.getAuthStatus();
-    if (clearRefresh && status.isLoggedIn) {
+    if (clearRefresh && status.isLoggedIn && status.refreshed) {
       authNeedsRefresh = false;
     }
     setLoginButton(Boolean(status.isLoggedIn));
@@ -148,6 +149,14 @@ async function updateAuthStatus({ clearRefresh = false, refresh = false } = {}) 
     console.error(error);
     setLoginButton(false);
     return { isLoggedIn: false };
+  }
+}
+
+async function invalidateStoredAuth() {
+  try {
+    await window.claudeFm.invalidateAuth();
+  } catch (error) {
+    console.error(error);
   }
 }
 
@@ -160,7 +169,7 @@ function startLoginPolling() {
       clearRefresh: true,
       refresh: true
     });
-    if (status.isLoggedIn || remainingChecks-- <= 0) {
+    if ((status.isLoggedIn && !authNeedsRefresh) || remainingChecks-- <= 0) {
       clearInterval(loginPollTimer);
       loginPollTimer = null;
       if (status.isLoggedIn) {
@@ -274,15 +283,21 @@ loginButton.addEventListener("click", async () => {
   loginButton.disabled = true;
   setStatus(authNeedsRefresh ? "正在打开 YouTube 重新登录页" : "正在打开 YouTube 登录页");
   try {
+    if (authNeedsRefresh) {
+      await invalidateStoredAuth();
+    }
     const status = await window.claudeFm.openLogin({
       forceLogin: authNeedsRefresh
     });
-    const refreshedStatus = status.isLoggedIn
-      ? await updateAuthStatus({ clearRefresh: true, refresh: true })
-      : status;
+    if (status.isLoggedIn && status.refreshed) {
+      authNeedsRefresh = false;
+    }
+    const refreshedStatus = status.refreshed
+      ? status
+      : await updateAuthStatus({ clearRefresh: true, refresh: true });
     setLoginButton(Boolean(refreshedStatus.isLoggedIn));
     setStatus(
-      refreshedStatus.isLoggedIn
+      refreshedStatus.isLoggedIn && !authNeedsRefresh
         ? "YouTube 登录已刷新"
         : authNeedsRefresh
           ? "请在 Chrome 窗口重新登录 YouTube"

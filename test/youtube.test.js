@@ -18,6 +18,7 @@ const {
   getLoginUrlForStatus,
   getAuthCookieFile,
   hasYouTubeLoginCookies,
+  invalidateAuthStatus,
   readStoredAuthStatus,
   findChromeExecutable
 } = require("../src/chromeAuth");
@@ -205,6 +206,29 @@ test("chrome auth reads stored login status without exposing cookie values", () 
   });
 });
 
+test("chrome auth can invalidate stale stored cookies", () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-fm-invalidate-test-"));
+  configureChromeAuth({ profileDir: dir });
+
+  fs.writeFileSync(
+    getAuthCookieFile(),
+    [
+      "# Netscape HTTP Cookie File",
+      ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tLOGIN_INFO\tsecret"
+    ].join("\n")
+  );
+
+  assert.equal(readStoredAuthStatus().isLoggedIn, true);
+  assert.deepEqual(invalidateAuthStatus(), {
+    cookieCount: 0,
+    isLoggedIn: false
+  });
+  assert.equal(fs.existsSync(getAuthCookieFile()), false);
+});
+
 test("chrome auth finds the first existing Chrome executable", () => {
   const chrome = findChromeExecutable({
     existsSync: (candidate) => candidate.endsWith("chrome.exe"),
@@ -266,6 +290,8 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
   assert.match(renderer, /clearRefresh: true/);
+  assert.match(renderer, /invalidateAuth/);
+  assert.match(renderer, /status\.refreshed/);
   assert.match(renderer, /openLogin\(\{\s*forceLogin: authNeedsRefresh\s*\}\)/);
   assert.match(renderer, /播放失败，请重新登录 YouTube/);
 });

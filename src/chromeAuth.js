@@ -114,6 +114,18 @@ function writeAuthCookieFile(cookies) {
   return getAuthCookieFile();
 }
 
+function invalidateAuthStatus() {
+  try {
+    fs.unlinkSync(getAuthCookieFile());
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  return readStoredAuthStatus();
+}
+
 function readStoredAuthStatus() {
   const cookieFile = getAuthCookieFile();
   if (!fs.existsSync(cookieFile)) {
@@ -253,10 +265,15 @@ async function openLoginWindow({ forceLogin = false } = {}) {
       if (forceLogin) {
         await openLoginTab(authState.port);
       }
+      const cookies = await readRunningChromeCookies();
+      if (cookies) {
+        writeAuthCookieFile(cookies);
+      }
       return {
-        isLoggedIn: readStoredAuthStatus().isLoggedIn,
+        ...readStoredAuthStatus(),
         profileDir: getAuthProfileDir(),
-        port: authState.port
+        port: authState.port,
+        refreshed: Boolean(cookies)
       };
     } catch {
       authState.child = null;
@@ -293,10 +310,16 @@ async function openLoginWindow({ forceLogin = false } = {}) {
   authState.child = child;
   authState.port = port;
 
+  const cookies = await readRunningChromeCookies();
+  if (cookies) {
+    writeAuthCookieFile(cookies);
+  }
+
   return {
-    isLoggedIn: status.isLoggedIn,
+    ...readStoredAuthStatus(),
     profileDir: getAuthProfileDir(),
-    port
+    port,
+    refreshed: Boolean(cookies)
   };
 }
 
@@ -351,7 +374,10 @@ async function refreshAuthStatus() {
     writeAuthCookieFile(cookies);
   }
 
-  return readStoredAuthStatus();
+  return {
+    ...readStoredAuthStatus(),
+    refreshed: Boolean(cookies)
+  };
 }
 
 module.exports = {
@@ -364,6 +390,7 @@ module.exports = {
   getAuthProfileDir,
   getLoginUrlForStatus,
   hasYouTubeLoginCookies,
+  invalidateAuthStatus,
   openLoginWindow,
   readStoredAuthStatus,
   refreshAuthStatus

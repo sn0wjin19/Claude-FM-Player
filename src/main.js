@@ -6,6 +6,7 @@ const { streamAudio, summarizeAudioError } = require("./audioStream");
 const {
   configureChromeAuth,
   ensureAuthCookieFile,
+  invalidateAuthStatus,
   openLoginWindow,
   readStoredAuthStatus,
   refreshAuthStatus
@@ -181,6 +182,10 @@ ipcMain.handle("claude-fm:open-login", async (_event, options = {}) => {
 
 ipcMain.handle("claude-fm:get-auth-status", async () => {
   return readStoredAuthStatus();
+});
+
+ipcMain.handle("claude-fm:invalidate-auth", async () => {
+  return invalidateAuthStatus();
 });
 
 ipcMain.handle("claude-fm:refresh-auth-status", async () => {
