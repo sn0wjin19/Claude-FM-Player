@@ -21,6 +21,7 @@ const {
   getAuthCookieFile,
   hasYouTubeLoginCookies,
   invalidateAuthStatus,
+  ensureAuthCookieFile,
   readStoredAuthStatus,
   findChromeExecutable
 } = require("../src/chromeAuth");
@@ -236,6 +237,24 @@ test("chrome auth can invalidate stale stored cookies", () => {
   assert.equal(fs.existsSync(getAuthCookieFile()), false);
 });
 
+test("chrome auth reuses stored login cookies before refreshing Chrome", async () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-fm-stored-cookie-test-"));
+  configureChromeAuth({ profileDir: dir });
+
+  fs.writeFileSync(
+    getAuthCookieFile(),
+    [
+      "# Netscape HTTP Cookie File",
+      ".youtube.com\tTRUE\t/\tTRUE\t2147483647\tLOGIN_INFO\tsecret"
+    ].join("\n")
+  );
+
+  assert.equal(await ensureAuthCookieFile(), getAuthCookieFile());
+});
+
 test("chrome auth finds the first existing Chrome executable", () => {
   const chrome = findChromeExecutable({
     existsSync: (candidate) => candidate.endsWith("chrome.exe"),
@@ -279,6 +298,7 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   const html = fs.readFileSync("src/index.html", "utf8");
   const css = fs.readFileSync("src/styles.css", "utf8");
   const main = fs.readFileSync("src/main.js", "utf8");
+  const preload = fs.readFileSync("src/preload.js", "utf8");
   const renderer = fs.readFileSync("src/renderer.js", "utf8");
 
   assert.match(html, /id="volumeSlider"[\s\S]*value="20"/);
@@ -303,6 +323,9 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /volumeSlider\.value = volume === 0 \? String\(lastAudibleVolume \|\| 20\) : "0"/);
   assert.match(renderer, /volumeIcon\.addEventListener\("click", toggleVolumeMute\)/);
   assert.match(renderer, /volumeIcon\.setAttribute\("aria-label", isMuted \? "恢复音量" : "静音"\)/);
+  assert.match(renderer, /window\.claudeFm\.preloadAudio\(videoId\)/);
+  assert.match(renderer, /正在准备音频/);
+  assert.match(preload, /preloadAudio: \(videoId\) => ipcRenderer\.invoke\("claude-fm:preload-audio", videoId\)/);
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
@@ -311,6 +334,11 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /status\.refreshed/);
   assert.match(renderer, /openLogin\(\{\s*forceLogin: authNeedsRefresh\s*\}\)/);
   assert.match(renderer, /播放失败，请重新登录 YouTube/);
+  assert.match(main, /AUDIO_INFO_CACHE_MS = 45_000/);
+  assert.match(main, /warmAudioInfo\(live\.videoId\)/);
+  assert.match(main, /getAudioInfo\(videoId, \{\s*getCookieFile: ensureAuthCookieFile\s*\}\)/);
+  assert.match(main, /getAudioInfo: loadAudioInfo/);
+  assert.match(main, /claude-fm:preload-audio/);
 });
 
 test("package metadata supports Windows builds without committing artifacts", () => {

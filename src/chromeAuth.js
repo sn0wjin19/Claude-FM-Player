@@ -359,6 +359,11 @@ async function exportCookiesWithTemporaryChrome() {
 }
 
 async function ensureAuthCookieFile() {
+  const storedStatus = readStoredAuthStatus();
+  if (storedStatus.isLoggedIn) {
+    return getAuthCookieFile();
+  }
+
   const cookies = await readRunningChromeCookies();
 
   if (cookies) {

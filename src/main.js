@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
-const { streamAudio, summarizeAudioError } = require("./audioStream");
+const { getAudioInfo, streamAudio, summarizeAudioError } = require("./audioStream");
 const {
   configureChromeAuth,
   ensureAuthCookieFile,
@@ -40,9 +40,50 @@ const VENDOR_FILES = {
   )
 };
 const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
+const AUDIO_INFO_CACHE_MS = 45_000;
 
 let staticServer;
 let currentAppOrigin;
+const audioInfoCache = new Map();
+
+function loadAudioInfo(videoId) {
+  const now = Date.now();
+  const cached = audioInfoCache.get(videoId);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
+  const promise = getAudioInfo(videoId, {
+    getCookieFile: ensureAuthCookieFile
+  })
+    .then((audioInfo) => {
+      audioInfoCache.set(videoId, {
+        expiresAt: Date.now() + AUDIO_INFO_CACHE_MS,
+        promise: Promise.resolve(audioInfo)
+      });
+      return audioInfo;
+    })
+    .catch((error) => {
+      if (audioInfoCache.get(videoId)?.promise === promise) {
+        audioInfoCache.delete(videoId);
+      }
+      throw error;
+    });
+
+  audioInfoCache.set(videoId, {
+    expiresAt: now + AUDIO_INFO_CACHE_MS,
+    promise
+  });
+
+  return promise;
+}
+
+function warmAudioInfo(videoId) {
+  loadAudioInfo(videoId).catch((error) => {
+    console.error(`Audio preload failed: ${summarizeAudioError(error)}`);
+  });
+}
 
 function getStaticFilePath(requestUrl) {
   const url = new URL(requestUrl, "http://127.0.0.1");
@@ -71,7 +112,7 @@ function startStaticServer() {
 
       try {
         await streamAudio(videoId, response, {
-          getCookieFile: ensureAuthCookieFile
+          getAudioInfo: loadAudioInfo
         });
       } catch (error) {
         console.error(summarizeAudioError(error));
@@ -177,7 +218,18 @@ function getAuthProfileDir() {
 
 ipcMain.handle("claude-fm:resolve-live", async () => {
   const signal = AbortSignal.timeout(15000);
-  return resolveClaudeLiveVideoId({ signal });
+  const live = await resolveClaudeLiveVideoId({ signal });
+  warmAudioInfo(live.videoId);
+  return live;
+});
+
+ipcMain.handle("claude-fm:preload-audio", async (_event, videoId) => {
+  if (!videoId || !VIDEO_ID_PATTERN.test(videoId)) {
+    throw new Error("Invalid video ID");
+  }
+
+  await loadAudioInfo(videoId);
+  return { preloaded: true };
 });
 
 ipcMain.handle("claude-fm:open-login", async (_event, options = {}) => {

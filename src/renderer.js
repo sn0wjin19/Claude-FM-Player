@@ -199,6 +199,12 @@ async function resolveLive() {
   try {
     const result = await window.claudeFm.resolveLive();
     videoId = result.videoId;
+    setStatus("正在准备音频");
+    try {
+      await window.claudeFm.preloadAudio(videoId);
+    } catch (error) {
+      console.error(error);
+    }
     setButton("play", "播放");
     setStatus("Claude FM 已就绪");
   } catch (error) {

@@ -126,7 +126,9 @@ function resolveFfmpegPath() {
 }
 
 async function streamAudio(videoId, response, options = {}) {
-  const audioInfo = await getAudioInfo(videoId, options);
+  const audioInfo = options.getAudioInfo
+    ? await options.getAudioInfo(videoId)
+    : await getAudioInfo(videoId, options);
   const ffmpeg = spawn(resolveFfmpegPath(), buildFfmpegArgs(audioInfo), {
     windowsHide: true
   });
