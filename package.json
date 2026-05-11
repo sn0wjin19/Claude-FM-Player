@@ -1,0 +1,80 @@
+{
+  "name": "claude-fm-player",
+  "version": "0.1.0",
+  "description": "Tiny desktop player for the Claude FM YouTube live stream.",
+  "main": "src/main.js",
+  "scripts": {
+    "dist": "electron-builder --win --x64",
+    "pack": "electron-builder --dir",
+    "start": "electron .",
+    "test": "node --test"
+  },
+  "keywords": [
+    "claude",
+    "youtube",
+    "music",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "build": {
+    "appId": "com.sn0wjin19.claudefmplayer",
+    "productName": "Claude FM Player",
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "README.md",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/yt-dlp-exec/bin/**"
+    ],
+    "win": {
+      "icon": "assets/icon.png",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-Setup-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-Portable-${arch}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^42.0.1",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "lucide": "^1.14.0",
+    "motion": "^12.38.0",
+    "yt-dlp-exec": "^1.0.2"
+  }
+}

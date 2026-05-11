@@ -1,0 +1,181 @@
+:root {
+  color: #1d1c19;
+  background: #f6f1e8;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+.shell {
+  align-items: center;
+  background: linear-gradient(135deg, #f6f1e8 0%, #f1e6d0 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100vh;
+  justify-content: center;
+  padding: 18px;
+  position: relative;
+}
+
+.controls {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+}
+
+.play-toggle {
+  align-items: center;
+  background: #1f1d1a;
+  border: 0;
+  border-radius: 999px;
+  color: #fffaf0;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: 700;
+  height: 56px;
+  justify-content: center;
+  letter-spacing: 0;
+  padding: 0;
+  width: 56px;
+}
+
+.play-toggle svg {
+  height: 26px;
+  width: 26px;
+}
+
+.button-icon {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.play-toggle.is-buffering .button-icon {
+  transform-origin: center;
+  will-change: transform;
+}
+
+.icon-button {
+  align-items: center;
+  background: rgba(31, 29, 26, 0.1);
+  border: 0;
+  border-radius: 999px;
+  color: #4f493f;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  width: 32px;
+}
+
+.icon-button:hover {
+  background: rgba(31, 29, 26, 0.16);
+}
+
+.icon-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.icon-button.is-authed {
+  background: rgba(47, 118, 86, 0.16);
+  color: #2f7656;
+}
+
+.icon-button svg {
+  height: 18px;
+  width: 18px;
+}
+
+.play-toggle:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.play-toggle:not(:disabled):hover {
+  background: #34302a;
+}
+
+.play-toggle:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.volume-control {
+  align-items: center;
+  color: #4f493f;
+  display: flex;
+  gap: 8px;
+  height: 32px;
+}
+
+.volume-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.volume-icon svg {
+  flex: 0 0 auto;
+  height: 20px;
+  width: 20px;
+}
+
+.volume-slider {
+  accent-color: #1f1d1a;
+  cursor: pointer;
+  height: 24px;
+  width: 108px;
+}
+
+.pixel-popover {
+  background: #fffaf0;
+  border: 2px solid #1f1d1a;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 #1f1d1a;
+  color: #1f1d1a;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 7px 9px;
+  position: absolute;
+  right: 10px;
+  top: 9px;
+  z-index: 2;
+}
+
+.pixel-popover[hidden] {
+  display: none;
+}
+
+.status {
+  color: #71695f;
+  font-size: 12px;
+  line-height: 1.2;
+  margin: 0;
+  min-height: 16px;
+  text-align: center;
+}
+
+audio {
+  height: 1px;
+  left: -9999px;
+  overflow: hidden;
+  position: absolute;
+  top: -9999px;
+  width: 1px;
+}
