@@ -171,6 +171,10 @@ function createWindow(appOrigin) {
   }
 }
 
+function getAuthProfileDir() {
+  return path.join(app.getPath("appData"), "claude-fm-player", "chrome-auth");
+}
+
 ipcMain.handle("claude-fm:resolve-live", async () => {
   const signal = AbortSignal.timeout(15000);
   return resolveClaudeLiveVideoId({ signal });
@@ -198,7 +202,7 @@ app.whenReady().then(async () => {
   }
 
   configureChromeAuth({
-    profileDir: path.join(app.getPath("userData"), "chrome-auth")
+    profileDir: getAuthProfileDir()
   });
   const { server, origin } = await startStaticServer();
   staticServer = server;

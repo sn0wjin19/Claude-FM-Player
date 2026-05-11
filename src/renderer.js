@@ -37,7 +37,7 @@ function stopBufferAnimation() {
 
 function startBufferAnimation() {
   const currentIconHost = button.querySelector(".button-icon");
-  const animate = window.Motion?.animate;
+  const animate = window.Motion?.animateMini || window.Motion?.animate;
 
   if (!currentIconHost || typeof animate !== "function") {
     return;
@@ -46,7 +46,7 @@ function startBufferAnimation() {
   currentIconHost.style.transformOrigin = "50% 50%";
   bufferAnimation = animate(
     currentIconHost,
-    { rotate: [0, 360, 360] },
+    { transform: ["rotate(0deg)", "rotate(360deg)", "rotate(360deg)"] },
     {
       duration: 1.55,
       ease: "easeInOut",

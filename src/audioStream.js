@@ -1,10 +1,28 @@
 const { spawn } = require("node:child_process");
+const path = require("node:path");
 const ffmpegStatic = require("ffmpeg-static");
-const ytdlp = require("yt-dlp-exec");
+const ytdlpExec = require("yt-dlp-exec");
+const { YOUTUBE_DL_PATH } = require("yt-dlp-exec/src/constants");
 const { COOKIE_FILE, resolveCookieFile } = require("./cookies");
 
 const EDGE_COOKIES = "edge:Default";
 const AUDIO_CONTENT_TYPE = "audio/aac";
+const ASAR_SEGMENT = `${path.sep}app.asar${path.sep}`;
+const ASAR_UNPACKED_SEGMENT = `${path.sep}app.asar.unpacked${path.sep}`;
+
+function resolveAsarUnpackedPath(filePath) {
+  if (!filePath || !filePath.includes(ASAR_SEGMENT)) {
+    return filePath;
+  }
+
+  return filePath.replace(ASAR_SEGMENT, ASAR_UNPACKED_SEGMENT);
+}
+
+function resolveYtDlpPath() {
+  return resolveAsarUnpackedPath(YOUTUBE_DL_PATH);
+}
+
+const ytdlp = ytdlpExec.create(resolveYtDlpPath());
 
 function buildWatchUrl(videoId) {
   return `https://www.youtube.com/watch?v=${videoId}`;
@@ -104,7 +122,7 @@ function killProcess(child) {
 }
 
 function resolveFfmpegPath() {
-  return process.env.CLAUDE_FM_FFMPEG_PATH || ffmpegStatic || "ffmpeg";
+  return process.env.CLAUDE_FM_FFMPEG_PATH || resolveAsarUnpackedPath(ffmpegStatic) || "ffmpeg";
 }
 
 async function streamAudio(videoId, response, options = {}) {
@@ -170,7 +188,9 @@ module.exports = {
   AUDIO_CONTENT_TYPE,
   getAudioInfo,
   getYtDlpOptions,
+  resolveAsarUnpackedPath,
   resolveFfmpegPath,
+  resolveYtDlpPath,
   summarizeAudioError,
   streamAudio
 };

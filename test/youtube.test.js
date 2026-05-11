@@ -9,7 +9,9 @@ const {
   buildFfmpegArgs,
   buildWatchUrl,
   getYtDlpOptions,
+  resolveAsarUnpackedPath,
   resolveFfmpegPath,
+  resolveYtDlpPath,
   summarizeAudioError
 } = require("../src/audioStream");
 const {
@@ -109,6 +111,11 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.equal(args.includes("libmp3lame"), false);
   assert.ok(args.includes("pipe:1"));
   assert.match(resolveFfmpegPath(), /ffmpeg/i);
+  assert.match(resolveYtDlpPath(), /yt-dlp/i);
+  assert.equal(
+    resolveAsarUnpackedPath("C:\\app\\resources\\app.asar\\node_modules\\tool\\bin.exe"),
+    "C:\\app\\resources\\app.asar.unpacked\\node_modules\\tool\\bin.exe"
+  );
 });
 
 test("audio stream helpers fall back when auth cookie provider returns nothing", async () => {
@@ -285,7 +292,8 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.doesNotMatch(css, /bufferSpinStep/);
   assert.match(renderer, /className = "button-icon"/);
   assert.match(renderer, /querySelector\("\.button-icon"\)/);
-  assert.match(renderer, /Motion\?\.animate/);
+  assert.match(renderer, /Motion\?\.animateMini \|\| window\.Motion\?\.animate/);
+  assert.match(renderer, /transform: \["rotate\(0deg\)", "rotate\(360deg\)", "rotate\(360deg\)"\]/);
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
@@ -313,4 +321,5 @@ test("package metadata supports Windows builds without committing artifacts", ()
   assert.match(gitignore, /^dist\/$/m);
   assert.match(gitignore, /^cookies\.txt$/m);
   assert.match(main, /assets", "icon\.png"/);
+  assert.match(main, /app\.getPath\("appData"\)[\s\S]*"claude-fm-player"[\s\S]*"chrome-auth"/);
 });
