@@ -69,8 +69,8 @@ function hasYouTubeLoginCookies(cookies) {
   );
 }
 
-function getLoginUrlForStatus(isLoggedIn) {
-  return isLoggedIn ? YOUTUBE_HOME_URL : YOUTUBE_LOGIN_URL;
+function getLoginUrlForStatus(isLoggedIn, { forceLogin = false } = {}) {
+  return isLoggedIn && !forceLogin ? YOUTUBE_HOME_URL : YOUTUBE_LOGIN_URL;
 }
 
 function chromeCookiesToNetscape(cookies) {
@@ -212,14 +212,24 @@ async function readCookiesFromPort(port) {
   }
 }
 
+async function openLoginTab(port) {
+  const version = await waitForDevTools(port);
+  await sendCdpCommand(version.webSocketDebuggerUrl, "Target.createTarget", {
+    url: YOUTUBE_LOGIN_URL
+  });
+}
+
 function isAuthChromeRunning() {
   return authState.child && authState.child.exitCode === null && !authState.child.killed;
 }
 
-async function openLoginWindow() {
+async function openLoginWindow({ forceLogin = false } = {}) {
   fs.mkdirSync(getAuthProfileDir(), { recursive: true });
 
   if (isAuthChromeRunning()) {
+    if (forceLogin) {
+      await openLoginTab(authState.port);
+    }
     return {
       isLoggedIn: readStoredAuthStatus().isLoggedIn,
       profileDir: getAuthProfileDir(),
@@ -243,7 +253,7 @@ async function openLoginWindow() {
       "--profile-directory=Default",
       "--no-first-run",
       "--no-default-browser-check",
-      getLoginUrlForStatus(status.isLoggedIn)
+      getLoginUrlForStatus(status.isLoggedIn, { forceLogin })
     ],
     {
       detached: true,

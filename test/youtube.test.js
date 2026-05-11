@@ -169,6 +169,10 @@ test("chrome auth chooses a clear login URL when not authenticated", () => {
     "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F"
   );
   assert.equal(getLoginUrlForStatus(true), "https://www.youtube.com/");
+  assert.equal(
+    getLoginUrlForStatus(true, { forceLogin: true }),
+    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F"
+  );
 });
 
 test("chrome auth reads stored login status without exposing cookie values", () => {
@@ -250,6 +254,10 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /querySelector\("\.button-icon"\)/);
   assert.match(renderer, /Motion\?\.animate/);
   assert.match(renderer, /showLoggedInPopover/);
+  assert.match(renderer, /authNeedsRefresh/);
+  assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
+  assert.match(renderer, /openLogin\(\{\s*forceLogin: authNeedsRefresh\s*\}\)/);
+  assert.match(renderer, /播放失败，请重新登录 YouTube/);
 });
 
 test("package metadata supports Windows builds without committing artifacts", () => {

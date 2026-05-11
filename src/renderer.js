@@ -11,6 +11,7 @@ let audioLoadedForVideoId;
 let loginPollTimer;
 let loginPopoverTimer;
 let isLoggedIn = false;
+let authNeedsRefresh = false;
 let bufferAnimation;
 
 function renderIcons() {
@@ -102,13 +103,27 @@ function syncVolume() {
 
 function setLoginButton(nextIsLoggedIn) {
   isLoggedIn = Boolean(nextIsLoggedIn);
-  setIcon(loginButton, isLoggedIn ? "user-check" : "user-round");
-  loginButton.classList.toggle("is-authed", isLoggedIn);
+  const showLoggedIn = isLoggedIn && !authNeedsRefresh;
+  setIcon(loginButton, showLoggedIn ? "user-check" : "user-round");
+  loginButton.classList.toggle("is-authed", showLoggedIn);
   loginButton.setAttribute(
     "aria-label",
-    isLoggedIn ? "YouTube 已登录" : "登录 YouTube"
+    authNeedsRefresh
+      ? "重新登录 YouTube"
+      : showLoggedIn
+        ? "YouTube 已登录"
+        : "登录 YouTube"
   );
-  loginButton.title = isLoggedIn ? "YouTube 已登录" : "登录 YouTube";
+  loginButton.title = authNeedsRefresh
+    ? "重新登录 YouTube"
+    : showLoggedIn
+      ? "YouTube 已登录"
+      : "登录 YouTube";
+}
+
+function markAuthNeedsRefresh() {
+  authNeedsRefresh = true;
+  setLoginButton(false);
 }
 
 function showLoggedInPopover() {
@@ -139,7 +154,7 @@ function startLoginPolling() {
   let remainingChecks = 40;
   loginPollTimer = setInterval(async () => {
     const status = await updateAuthStatus({ refresh: true });
-    if (status.isLoggedIn || remainingChecks-- <= 0) {
+    if ((status.isLoggedIn && !authNeedsRefresh) || remainingChecks-- <= 0) {
       clearInterval(loginPollTimer);
       loginPollTimer = null;
       if (status.isLoggedIn) {
@@ -202,8 +217,9 @@ async function play() {
   } catch (error) {
     console.error(error);
     stopAudioStream();
+    markAuthNeedsRefresh();
     setButton("rotate-cw", "重试");
-    setStatus("播放失败，请登录 YouTube");
+    setStatus("播放失败，请重新登录 YouTube");
   }
 }
 
@@ -219,6 +235,8 @@ button.addEventListener("click", () => {
 });
 
 audio.addEventListener("playing", () => {
+  authNeedsRefresh = false;
+  updateAuthStatus();
   setButton("pause", "暂停");
   setStatus("正在播放");
 });
@@ -235,24 +253,31 @@ audio.addEventListener("pause", () => {
 
 audio.addEventListener("error", () => {
   audioLoadedForVideoId = null;
+  markAuthNeedsRefresh();
   setButton("rotate-cw", "重试");
-  setStatus("播放失败，请登录 YouTube");
+  setStatus("播放失败，请重新登录 YouTube");
 });
 
 volumeSlider.addEventListener("input", syncVolume);
 loginButton.addEventListener("click", async () => {
-  if (isLoggedIn) {
+  if (isLoggedIn && !authNeedsRefresh) {
     showLoggedInPopover();
     return;
   }
 
   loginButton.disabled = true;
-  setStatus("正在打开 YouTube 登录页");
+  setStatus(authNeedsRefresh ? "正在打开 YouTube 重新登录页" : "正在打开 YouTube 登录页");
   try {
-    const status = await window.claudeFm.openLogin();
+    const status = await window.claudeFm.openLogin({
+      forceLogin: authNeedsRefresh
+    });
     setLoginButton(Boolean(status.isLoggedIn));
     setStatus(
-      status.isLoggedIn ? "YouTube 已登录" : "请在 Chrome 窗口登录 YouTube"
+      authNeedsRefresh
+        ? "请在 Chrome 窗口重新登录 YouTube"
+        : status.isLoggedIn
+          ? "YouTube 已登录"
+          : "请在 Chrome 窗口登录 YouTube"
     );
     startLoginPolling();
   } catch (error) {

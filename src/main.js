@@ -175,8 +175,8 @@ ipcMain.handle("claude-fm:resolve-live", async () => {
   return resolveClaudeLiveVideoId({ signal });
 });
 
-ipcMain.handle("claude-fm:open-login", async () => {
-  return openLoginWindow();
+ipcMain.handle("claude-fm:open-login", async (_event, options = {}) => {
+  return openLoginWindow(options);
 });
 
 ipcMain.handle("claude-fm:get-auth-status", async () => {
