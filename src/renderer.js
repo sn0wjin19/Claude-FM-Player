@@ -134,11 +134,14 @@ function showLoggedInPopover() {
   }, 2400);
 }
 
-async function updateAuthStatus({ refresh = false } = {}) {
+async function updateAuthStatus({ clearRefresh = false, refresh = false } = {}) {
   try {
     const status = refresh
       ? await window.claudeFm.refreshAuthStatus()
       : await window.claudeFm.getAuthStatus();
+    if (clearRefresh && status.isLoggedIn) {
+      authNeedsRefresh = false;
+    }
     setLoginButton(Boolean(status.isLoggedIn));
     return status;
   } catch (error) {
@@ -153,12 +156,15 @@ function startLoginPolling() {
 
   let remainingChecks = 40;
   loginPollTimer = setInterval(async () => {
-    const status = await updateAuthStatus({ refresh: true });
-    if ((status.isLoggedIn && !authNeedsRefresh) || remainingChecks-- <= 0) {
+    const status = await updateAuthStatus({
+      clearRefresh: true,
+      refresh: true
+    });
+    if (status.isLoggedIn || remainingChecks-- <= 0) {
       clearInterval(loginPollTimer);
       loginPollTimer = null;
       if (status.isLoggedIn) {
-        setStatus("YouTube 已登录");
+        setStatus("YouTube 登录已刷新");
       }
     }
   }, 3000);
@@ -271,12 +277,15 @@ loginButton.addEventListener("click", async () => {
     const status = await window.claudeFm.openLogin({
       forceLogin: authNeedsRefresh
     });
-    setLoginButton(Boolean(status.isLoggedIn));
+    const refreshedStatus = status.isLoggedIn
+      ? await updateAuthStatus({ clearRefresh: true, refresh: true })
+      : status;
+    setLoginButton(Boolean(refreshedStatus.isLoggedIn));
     setStatus(
-      authNeedsRefresh
-        ? "请在 Chrome 窗口重新登录 YouTube"
-        : status.isLoggedIn
-          ? "YouTube 已登录"
+      refreshedStatus.isLoggedIn
+        ? "YouTube 登录已刷新"
+        : authNeedsRefresh
+          ? "请在 Chrome 窗口重新登录 YouTube"
           : "请在 Chrome 窗口登录 YouTube"
     );
     startLoginPolling();

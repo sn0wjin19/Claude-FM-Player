@@ -118,7 +118,7 @@ test("audio stream helpers fall back when auth cookie provider returns nothing",
   assert.equal(options.jsRuntimes, process.env.CLAUDE_FM_JS_RUNTIME || "node");
 });
 
-test("chrome auth converts CDP YouTube cookies to Netscape format", () => {
+test("chrome auth converts CDP YouTube and Google cookies to Netscape format", () => {
   const text = chromeCookiesToNetscape([
     {
       domain: ".youtube.com",
@@ -131,6 +131,14 @@ test("chrome auth converts CDP YouTube cookies to Netscape format", () => {
     },
     {
       domain: ".google.com",
+      expires: -1,
+      name: "SID",
+      path: "/",
+      secure: true,
+      value: "google"
+    },
+    {
+      domain: ".example.com",
       expires: -1,
       name: "SID",
       path: "/",
@@ -149,8 +157,9 @@ test("chrome auth converts CDP YouTube cookies to Netscape format", () => {
 
   assert.match(text, /^# Netscape HTTP Cookie File/m);
   assert.match(text, /\.youtube\.com\tTRUE\t\/\tTRUE\t2147483647\tLOGIN_INFO\tabc/);
+  assert.match(text, /\.google\.com\tTRUE\t\/\tTRUE\t0\tSID\tgoogle/);
   assert.match(text, /youtube\.com\tFALSE\t\/\tTRUE\t0\tYSC\txyz/);
-  assert.doesNotMatch(text, /SID/);
+  assert.doesNotMatch(text, /example/);
 });
 
 test("chrome auth detects YouTube login status from cookies", () => {
@@ -256,6 +265,7 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
+  assert.match(renderer, /clearRefresh: true/);
   assert.match(renderer, /openLogin\(\{\s*forceLogin: authNeedsRefresh\s*\}\)/);
   assert.match(renderer, /播放失败，请重新登录 YouTube/);
 });

@@ -8,6 +8,7 @@ const YOUTUBE_HOME_URL = "https://www.youtube.com/";
 const YOUTUBE_LOGIN_URL =
   "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fwww.youtube.com%2F";
 const COOKIE_EXPIRY_FALLBACK = 2147483647;
+const AUTH_COOKIE_DOMAIN_SUFFIXES = ["youtube.com", "google.com"];
 
 let authState = {
   child: null,
@@ -59,6 +60,13 @@ function isYouTubeCookie(cookie) {
   return domain === "youtube.com" || domain.endsWith(".youtube.com");
 }
 
+function isAuthCookie(cookie) {
+  const domain = cookie.domain || "";
+  return AUTH_COOKIE_DOMAIN_SUFFIXES.some(
+    (suffix) => domain === suffix || domain.endsWith(`.${suffix}`)
+  );
+}
+
 function hasYouTubeLoginCookies(cookies) {
   return cookies.some(
     (cookie) =>
@@ -79,7 +87,7 @@ function chromeCookiesToNetscape(cookies) {
     "# Generated locally by Claude FM Player from the dedicated Chrome profile."
   ];
 
-  for (const cookie of cookies.filter(isYouTubeCookie)) {
+  for (const cookie of cookies.filter(isAuthCookie)) {
     const domain = cookie.domain || ".youtube.com";
     const includeSubdomains = domain.startsWith(".") ? "TRUE" : "FALSE";
     const pathValue = cookie.path || "/";
@@ -223,18 +231,37 @@ function isAuthChromeRunning() {
   return authState.child && authState.child.exitCode === null && !authState.child.killed;
 }
 
+async function readRunningChromeCookies() {
+  if (!isAuthChromeRunning()) {
+    return null;
+  }
+
+  try {
+    return await readCookiesFromPort(authState.port);
+  } catch {
+    authState.child = null;
+    authState.port = null;
+    return null;
+  }
+}
+
 async function openLoginWindow({ forceLogin = false } = {}) {
   fs.mkdirSync(getAuthProfileDir(), { recursive: true });
 
   if (isAuthChromeRunning()) {
-    if (forceLogin) {
-      await openLoginTab(authState.port);
+    try {
+      if (forceLogin) {
+        await openLoginTab(authState.port);
+      }
+      return {
+        isLoggedIn: readStoredAuthStatus().isLoggedIn,
+        profileDir: getAuthProfileDir(),
+        port: authState.port
+      };
+    } catch {
+      authState.child = null;
+      authState.port = null;
     }
-    return {
-      isLoggedIn: readStoredAuthStatus().isLoggedIn,
-      profileDir: getAuthProfileDir(),
-      port: authState.port
-    };
   }
 
   const chromePath = findChromeExecutable();
@@ -309,9 +336,7 @@ async function exportCookiesWithTemporaryChrome() {
 }
 
 async function ensureAuthCookieFile() {
-  const cookies = isAuthChromeRunning()
-    ? await readCookiesFromPort(authState.port)
-    : null;
+  const cookies = await readRunningChromeCookies();
 
   if (cookies) {
     return writeAuthCookieFile(cookies);
@@ -321,8 +346,8 @@ async function ensureAuthCookieFile() {
 }
 
 async function refreshAuthStatus() {
-  if (isAuthChromeRunning()) {
-    const cookies = await readCookiesFromPort(authState.port);
+  const cookies = await readRunningChromeCookies();
+  if (cookies) {
     writeAuthCookieFile(cookies);
   }
 
