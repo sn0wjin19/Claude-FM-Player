@@ -46,12 +46,11 @@ function startBufferAnimation() {
   currentIconHost.style.transformOrigin = "50% 50%";
   bufferAnimation = animate(
     currentIconHost,
-    { transform: ["rotate(0deg)", "rotate(360deg)", "rotate(360deg)"] },
+    { transform: ["rotate(0deg)", "rotate(360deg)"] },
     {
-      duration: 1.55,
-      ease: "easeInOut",
-      repeat: Infinity,
-      times: [0, 0.62, 1]
+      duration: 1.2,
+      ease: "easeOut",
+      repeat: Infinity
     }
   );
 }

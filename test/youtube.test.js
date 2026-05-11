@@ -293,7 +293,9 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /className = "button-icon"/);
   assert.match(renderer, /querySelector\("\.button-icon"\)/);
   assert.match(renderer, /Motion\?\.animateMini \|\| window\.Motion\?\.animate/);
-  assert.match(renderer, /transform: \["rotate\(0deg\)", "rotate\(360deg\)", "rotate\(360deg\)"\]/);
+  assert.match(renderer, /transform: \["rotate\(0deg\)", "rotate\(360deg\)"\]/);
+  assert.match(renderer, /ease: "easeOut"/);
+  assert.doesNotMatch(renderer, /times: \[0, 0\.62, 1\]/);
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
