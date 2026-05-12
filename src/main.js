@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell } = require("electron");
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
@@ -198,6 +198,13 @@ function createWindow(appOrigin) {
   });
 
   win.removeMenu();
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://www.youtube.com/")) {
+      shell.openExternal(url);
+    }
+
+    return { action: "deny" };
+  });
   win.loadURL(`${appOrigin}/index.html`);
 
   if (process.env.CLAUDE_FM_SMOKE === "1") {

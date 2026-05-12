@@ -3,6 +3,7 @@ const statusText = document.querySelector("#status");
 const audio = document.querySelector("#audio");
 const loginButton = document.querySelector("#loginButton");
 const loginPopover = document.querySelector("#loginPopover");
+const liveLink = document.querySelector("#liveLink");
 const volumeIcon = document.querySelector("#volumeIcon");
 const volumeSlider = document.querySelector("#volumeSlider");
 
@@ -80,6 +81,10 @@ function setButton(iconName, label, disabled = false) {
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function setLiveLink(nextVideoId) {
+  liveLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(nextVideoId)}`;
 }
 
 function setIcon(target, iconName) {
@@ -199,6 +204,7 @@ async function resolveLive() {
   try {
     const result = await window.claudeFm.resolveLive();
     videoId = result.videoId;
+    setLiveLink(videoId);
     setStatus("正在准备音频");
     try {
       await window.claudeFm.preloadAudio(videoId);

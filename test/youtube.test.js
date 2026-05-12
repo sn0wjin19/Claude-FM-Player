@@ -6,6 +6,7 @@ const {
   resolveClaudeLiveVideoId
 } = require("../src/youtube");
 const {
+  AUDIO_CONTENT_TYPE,
   buildFfmpegArgs,
   buildWatchUrl,
   getYtDlpOptions,
@@ -83,6 +84,7 @@ test("resolveClaudeLiveVideoId falls back to html parsing", async () => {
 });
 
 test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
+  assert.equal(AUDIO_CONTENT_TYPE, "audio/aac");
   assert.equal(buildWatchUrl("abcdefghijk"), "https://www.youtube.com/watch?v=abcdefghijk");
   const options = await getYtDlpOptions({
     getCookieFile: async () => "C:\\auth\\youtube-cookies.txt"
@@ -109,6 +111,7 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.ok(args.includes("copy"));
   assert.ok(args.includes("-f"));
   assert.ok(args.includes("adts"));
+  assert.equal(args.includes("-movflags"), false);
   assert.equal(args.includes("libmp3lame"), false);
   assert.ok(args.includes("pipe:1"));
   assert.match(resolveFfmpegPath(), /ffmpeg/i);
@@ -302,6 +305,7 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   const renderer = fs.readFileSync("src/renderer.js", "utf8");
 
   assert.match(html, /id="volumeSlider"[\s\S]*value="20"/);
+  assert.match(html, /id="liveLink"[\s\S]*href="https:\/\/www\.youtube\.com\/@claude\/live"[\s\S]*Cloud FM/);
   assert.match(html, /id="volumeIcon"[\s\S]*type="button"/);
   assert.match(html, /id="volumeIcon"[\s\S]*aria-label="静音"/);
   assert.match(html, /id="loginPopover"/);
@@ -309,6 +313,8 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(html, /style-src 'self' 'unsafe-inline'/);
   assert.match(html, /vendor\/motion\.js/);
   assert.match(main, /node_modules[\s\S]*motion[\s\S]*dist[\s\S]*motion\.js/);
+  assert.match(main, /shell\.openExternal\(url\)/);
+  assert.match(main, /setWindowOpenHandler/);
   assert.match(css, /\.play-toggle\.is-buffering \.button-icon/);
   assert.match(css, /\.pixel-popover \{[\s\S]*top: 2px;/);
   assert.doesNotMatch(css, /bufferSpinStep/);
@@ -323,6 +329,10 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /volumeSlider\.value = volume === 0 \? String\(lastAudibleVolume \|\| 20\) : "0"/);
   assert.match(renderer, /volumeIcon\.addEventListener\("click", toggleVolumeMute\)/);
   assert.match(renderer, /volumeIcon\.setAttribute\("aria-label", isMuted \? "恢复音量" : "静音"\)/);
+  assert.match(renderer, /function setLiveLink\(nextVideoId\)/);
+  assert.match(renderer, /liveLink\.href = `https:\/\/www\.youtube\.com\/watch\?v=\$\{encodeURIComponent\(nextVideoId\)\}`/);
+  assert.match(renderer, /audio\.src = `\/audio\.mp3\?videoId=/);
+  assert.doesNotMatch(renderer, /\/audio\.mp4/);
   assert.match(renderer, /window\.claudeFm\.preloadAudio\(videoId\)/);
   assert.match(renderer, /正在准备音频/);
   assert.match(preload, /preloadAudio: \(videoId\) => ipcRenderer\.invoke\("claude-fm:preload-audio", videoId\)/);

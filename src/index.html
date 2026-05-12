@@ -24,25 +24,36 @@
         >
           <i data-lucide="loader-circle" aria-hidden="true"></i>
         </button>
-        <div class="volume-control" title="音量">
-          <button
-            id="volumeIcon"
-            class="volume-icon"
-            type="button"
-            aria-label="静音"
-            title="静音"
+        <div class="volume-stack">
+          <a
+            id="liveLink"
+            class="live-link"
+            href="https://www.youtube.com/@claude/live"
+            target="_blank"
+            rel="noopener noreferrer"
           >
-            <i data-lucide="volume-2"></i>
-          </button>
-          <input
-            id="volumeSlider"
-            class="volume-slider"
-            type="range"
-            min="0"
-            max="100"
-            value="20"
-            aria-label="音量"
-          />
+            Cloud FM
+          </a>
+          <div class="volume-control" title="音量">
+            <button
+              id="volumeIcon"
+              class="volume-icon"
+              type="button"
+              aria-label="静音"
+              title="静音"
+            >
+              <i data-lucide="volume-2"></i>
+            </button>
+            <input
+              id="volumeSlider"
+              class="volume-slider"
+              type="range"
+              min="0"
+              max="100"
+              value="20"
+              aria-label="音量"
+            />
+          </div>
         </div>
         <button
           id="loginButton"
