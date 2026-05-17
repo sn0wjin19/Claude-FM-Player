@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude FM 设置</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="settings-page">
+    <main class="settings-shell">
+      <header class="settings-header">
+        <h1>设置</h1>
+      </header>
+      <label class="settings-field" for="proxyInput">
+        <span>代理地址</span>
+        <input
+          id="proxyInput"
+          class="settings-input"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="127.0.0.1:7890"
+        />
+      </label>
+      <p class="settings-hint">留空直连，支持 http://host:port。</p>
+      <p id="settingsStatus" class="settings-status" role="status" aria-live="polite"></p>
+      <footer class="settings-actions">
+        <button id="cancelSettings" class="settings-button secondary" type="button">
+          取消
+        </button>
+        <button id="applySettings" class="settings-button primary" type="button">
+          应用
+        </button>
+      </footer>
+    </main>
+    <script src="./settingsRenderer.js"></script>
+  </body>
+</html>

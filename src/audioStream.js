@@ -9,6 +9,18 @@ const EDGE_COOKIES = "edge:Default";
 const AUDIO_CONTENT_TYPE = "audio/aac";
 const ASAR_SEGMENT = `${path.sep}app.asar${path.sep}`;
 const ASAR_UNPACKED_SEGMENT = `${path.sep}app.asar.unpacked${path.sep}`;
+const LIVE_UNAVAILABLE_STATUSES = new Set([
+  "is_upcoming",
+  "not_live",
+  "post_live",
+  "was_live"
+]);
+const LIVE_UNAVAILABLE_ERROR_PATTERNS = [
+  "We're experiencing technical difficulties",
+  "This live event has paused",
+  "This live event will begin",
+  "The live stream is offline"
+];
 
 function resolveAsarUnpackedPath(filePath) {
   if (!filePath || !filePath.includes(ASAR_SEGMENT)) {
@@ -28,7 +40,7 @@ function buildWatchUrl(videoId) {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
-async function getYtDlpOptions({ getCookieFile } = {}) {
+async function getYtDlpOptions({ getCookieFile, proxyUrl } = {}) {
   let cookieFile = null;
   let cookieFileError = null;
 
@@ -62,25 +74,75 @@ async function getYtDlpOptions({ getCookieFile } = {}) {
     options.cookiesFromBrowser = EDGE_COOKIES;
   }
 
+  if (proxyUrl) {
+    options.proxy = proxyUrl;
+  }
+
   return options;
+}
+
+function buildAudioInfoFromYtDlpInfo(info) {
+  return {
+    audioCodec: info.acodec || "",
+    headers: info.http_headers || {},
+    isLive: Boolean(info.is_live),
+    liveStatus: info.live_status || "",
+    title: info.title || "Claude FM",
+    url: info.url || ""
+  };
+}
+
+function isPlayableAudioInfo(audioInfo) {
+  if (audioInfo.isLive || audioInfo.liveStatus === "is_live") {
+    return true;
+  }
+
+  if (LIVE_UNAVAILABLE_STATUSES.has(audioInfo.liveStatus)) {
+    return false;
+  }
+
+  return Boolean(audioInfo.url);
+}
+
+function createLiveStatusError(audioInfo) {
+  const status = audioInfo.liveStatus || "unknown";
+  const error = new Error(`Claude FM live stream is not active (${status}).`);
+  error.code = "CLAUDE_FM_LIVE_UNAVAILABLE";
+  error.liveStatus = status;
+  return error;
+}
+
+function getErrorMessage(error) {
+  return [error?.stderr, error?.message, error?.shortMessage, String(error)]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isLiveUnavailableError(error) {
+  if (error?.code === "CLAUDE_FM_LIVE_UNAVAILABLE") {
+    return true;
+  }
+
+  const message = getErrorMessage(error);
+  return LIVE_UNAVAILABLE_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
 async function getAudioInfo(videoId, options = {}) {
   const info = await ytdlp(buildWatchUrl(videoId), await getYtDlpOptions(options));
+  const audioInfo = buildAudioInfoFromYtDlpInfo(info);
 
-  if (!info.url) {
+  if (!isPlayableAudioInfo(audioInfo)) {
+    return audioInfo;
+  }
+
+  if (!audioInfo.url) {
     throw new Error("yt-dlp did not return a playable audio URL.");
   }
 
-  return {
-    audioCodec: info.acodec || "",
-    headers: info.http_headers || {},
-    title: info.title || "Claude FM",
-    url: info.url
-  };
+  return audioInfo;
 }
 
-function buildFfmpegArgs(audioInfo) {
+function buildFfmpegArgs(audioInfo, { proxyUrl } = {}) {
   const args = [
     "-hide_banner",
     "-loglevel",
@@ -99,6 +161,10 @@ function buildFfmpegArgs(audioInfo) {
 
   if (headers) {
     args.push("-headers", `${headers}\r\n`);
+  }
+
+  if (proxyUrl) {
+    args.push("-http_proxy", proxyUrl);
   }
 
   args.push(
@@ -129,7 +195,11 @@ async function streamAudio(videoId, response, options = {}) {
   const audioInfo = options.getAudioInfo
     ? await options.getAudioInfo(videoId)
     : await getAudioInfo(videoId, options);
-  const ffmpeg = spawn(resolveFfmpegPath(), buildFfmpegArgs(audioInfo), {
+  if (!isPlayableAudioInfo(audioInfo)) {
+    throw createLiveStatusError(audioInfo);
+  }
+
+  const ffmpeg = spawn(resolveFfmpegPath(), buildFfmpegArgs(audioInfo, options), {
     windowsHide: true
   });
 
@@ -154,7 +224,11 @@ async function streamAudio(videoId, response, options = {}) {
 }
 
 function summarizeAudioError(error) {
-  const message = error?.stderr || error?.message || String(error);
+  const message = getErrorMessage(error);
+
+  if (isLiveUnavailableError(error)) {
+    return "Claude FM live stream is paused.";
+  }
 
   if (message.includes("cookies are no longer valid")) {
     return "cookies.txt is no longer valid.";
@@ -184,12 +258,15 @@ function summarizeAudioError(error) {
 }
 
 module.exports = {
+  buildAudioInfoFromYtDlpInfo,
   buildFfmpegArgs,
   buildWatchUrl,
   COOKIE_FILE,
   AUDIO_CONTENT_TYPE,
   getAudioInfo,
   getYtDlpOptions,
+  isLiveUnavailableError,
+  isPlayableAudioInfo,
   resolveAsarUnpackedPath,
   resolveFfmpegPath,
   resolveYtDlpPath,

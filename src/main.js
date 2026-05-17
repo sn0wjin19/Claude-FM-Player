@@ -1,8 +1,14 @@
-const { app, BrowserWindow, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, net, session, shell } = require("electron");
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
-const { getAudioInfo, streamAudio, summarizeAudioError } = require("./audioStream");
+const {
+  getAudioInfo,
+  isLiveUnavailableError,
+  isPlayableAudioInfo,
+  streamAudio,
+  summarizeAudioError
+} = require("./audioStream");
 const {
   configureChromeAuth,
   ensureAuthCookieFile,
@@ -11,6 +17,13 @@ const {
   readStoredAuthStatus,
   refreshAuthStatus
 } = require("./chromeAuth");
+const {
+  configureSettings,
+  DEFAULT_SETTINGS,
+  normalizeSettings,
+  readSettings,
+  writeSettings
+} = require("./settings");
 const { resolveClaudeLiveVideoId } = require("./youtube");
 
 const STATIC_ROOT = __dirname;
@@ -44,7 +57,36 @@ const AUDIO_INFO_CACHE_MS = 45_000;
 
 let staticServer;
 let currentAppOrigin;
+let appSettings = { ...DEFAULT_SETTINGS };
+let settingsWindow;
 const audioInfoCache = new Map();
+
+function getSettingsPath() {
+  return path.join(app.getPath("appData"), "claude-fm-player", "settings.json");
+}
+
+function getProxyConfig(proxyUrl) {
+  if (!proxyUrl) {
+    return {
+      proxyRules: "direct://"
+    };
+  }
+
+  return {
+    proxyRules: proxyUrl,
+    proxyBypassRules: "127.0.0.1;localhost;<local>"
+  };
+}
+
+async function applyProxySettings(settings) {
+  appSettings = normalizeSettings(settings);
+  audioInfoCache.clear();
+  await session.defaultSession.setProxy(getProxyConfig(appSettings.proxyUrl));
+}
+
+function fetchWithAppProxy(url, options) {
+  return net.fetch(url, options);
+}
 
 function loadAudioInfo(videoId) {
   const now = Date.now();
@@ -55,7 +97,8 @@ function loadAudioInfo(videoId) {
   }
 
   const promise = getAudioInfo(videoId, {
-    getCookieFile: ensureAuthCookieFile
+    getCookieFile: () => ensureAuthCookieFile({ proxyUrl: appSettings.proxyUrl }),
+    proxyUrl: appSettings.proxyUrl
   })
     .then((audioInfo) => {
       audioInfoCache.set(videoId, {
@@ -112,15 +155,19 @@ function startStaticServer() {
 
       try {
         await streamAudio(videoId, response, {
-          getAudioInfo: loadAudioInfo
+          getAudioInfo: loadAudioInfo,
+          proxyUrl: appSettings.proxyUrl
         });
       } catch (error) {
         console.error(summarizeAudioError(error));
-        response.writeHead(502, {
+        const liveUnavailable = isLiveUnavailableError(error);
+        response.writeHead(liveUnavailable ? 409 : 502, {
           "content-type": "text/plain; charset=utf-8"
         });
         response.end(
-          "无法读取 YouTube 音频。请点击用户图标登录 YouTube，或在项目根目录放置 cookies.txt。"
+          liveUnavailable
+            ? "Claude FM 直播暂停中，请稍后刷新。"
+            : "无法读取 YouTube 音频。请点击用户图标登录 YouTube，或在项目根目录放置 cookies.txt。"
         );
       }
       return;
@@ -176,9 +223,9 @@ function startStaticServer() {
 
 function createWindow(appOrigin) {
   const win = new BrowserWindow({
-    width: 280,
+    width: 330,
     height: 138,
-    minWidth: 240,
+    minWidth: 300,
     minHeight: 120,
     resizable: false,
     title: "Claude FM",
@@ -219,13 +266,52 @@ function createWindow(appOrigin) {
   }
 }
 
+function createSettingsWindow(appOrigin) {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 420,
+    height: 260,
+    minWidth: 380,
+    minHeight: 250,
+    resizable: false,
+    title: "Claude FM 设置",
+    backgroundColor: "#f6f1e8",
+    icon: APP_ICON,
+    center: true,
+    show: false,
+    useContentSize: true,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  settingsWindow.removeMenu();
+  settingsWindow.loadURL(`${appOrigin}/settings.html`);
+  settingsWindow.once("ready-to-show", () => {
+    settingsWindow?.show();
+    settingsWindow?.focus();
+  });
+  settingsWindow.on("closed", () => {
+    settingsWindow = null;
+  });
+}
+
 function getAuthProfileDir() {
   return path.join(app.getPath("appData"), "claude-fm-player", "chrome-auth");
 }
 
 ipcMain.handle("claude-fm:resolve-live", async () => {
   const signal = AbortSignal.timeout(15000);
-  const live = await resolveClaudeLiveVideoId({ signal });
+  const live = await resolveClaudeLiveVideoId({
+    fetchImpl: fetchWithAppProxy,
+    signal
+  });
   warmAudioInfo(live.videoId);
   return live;
 });
@@ -235,12 +321,61 @@ ipcMain.handle("claude-fm:preload-audio", async (_event, videoId) => {
     throw new Error("Invalid video ID");
   }
 
-  await loadAudioInfo(videoId);
-  return { preloaded: true };
+  try {
+    const audioInfo = await loadAudioInfo(videoId);
+    return {
+      isLive: audioInfo.isLive,
+      liveStatus: audioInfo.liveStatus,
+      playable: isPlayableAudioInfo(audioInfo),
+      preloaded: isPlayableAudioInfo(audioInfo)
+    };
+  } catch (error) {
+    if (!isLiveUnavailableError(error)) {
+      throw error;
+    }
+
+    return {
+      isLive: false,
+      liveStatus: "unavailable",
+      playable: false,
+      preloaded: false
+    };
+  }
 });
 
 ipcMain.handle("claude-fm:open-login", async (_event, options = {}) => {
-  return openLoginWindow(options);
+  return openLoginWindow({
+    ...options,
+    proxyUrl: appSettings.proxyUrl
+  });
+});
+
+ipcMain.handle("claude-fm:open-settings", () => {
+  createSettingsWindow(currentAppOrigin);
+});
+
+ipcMain.handle("claude-fm:close-settings", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.handle("claude-fm:get-settings", async () => {
+  return appSettings;
+});
+
+ipcMain.handle("claude-fm:save-settings", async (_event, nextSettings) => {
+  const normalized = normalizeSettings({
+    ...appSettings,
+    ...nextSettings
+  });
+  const proxyChanged = normalized.proxyUrl !== appSettings.proxyUrl;
+
+  if (proxyChanged) {
+    await applyProxySettings(normalized);
+  } else {
+    appSettings = normalized;
+  }
+
+  return writeSettings(appSettings);
 });
 
 ipcMain.handle("claude-fm:get-auth-status", async () => {
@@ -263,6 +398,10 @@ app.whenReady().then(async () => {
   configureChromeAuth({
     profileDir: getAuthProfileDir()
   });
+  configureSettings({
+    settingsPath: getSettingsPath()
+  });
+  await applyProxySettings(await readSettings());
   const { server, origin } = await startStaticServer();
   staticServer = server;
   currentAppOrigin = origin;

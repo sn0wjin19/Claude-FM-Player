@@ -9,7 +9,10 @@ const {
   AUDIO_CONTENT_TYPE,
   buildFfmpegArgs,
   buildWatchUrl,
+  buildAudioInfoFromYtDlpInfo,
   getYtDlpOptions,
+  isPlayableAudioInfo,
+  isLiveUnavailableError,
   resolveAsarUnpackedPath,
   resolveFfmpegPath,
   resolveYtDlpPath,
@@ -17,6 +20,7 @@ const {
 } = require("../src/audioStream");
 const {
   chromeCookiesToNetscape,
+  buildChromeArgs,
   configureChromeAuth,
   getLoginUrlForStatus,
   getAuthCookieFile,
@@ -31,6 +35,13 @@ const {
   isNetscapeCookieFile,
   parseCookieHeader
 } = require("../src/cookies");
+const {
+  configureSettings,
+  normalizeProxyUrl,
+  normalizeVolume,
+  readSettings,
+  writeSettings
+} = require("../src/settings");
 
 test("extractVideoId reads common YouTube URL shapes", () => {
   assert.equal(extractVideoId("https://www.youtube.com/watch?v=abcdefghijk"), "abcdefghijk");
@@ -87,10 +98,12 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.equal(AUDIO_CONTENT_TYPE, "audio/aac");
   assert.equal(buildWatchUrl("abcdefghijk"), "https://www.youtube.com/watch?v=abcdefghijk");
   const options = await getYtDlpOptions({
-    getCookieFile: async () => "C:\\auth\\youtube-cookies.txt"
+    getCookieFile: async () => "C:\\auth\\youtube-cookies.txt",
+    proxyUrl: "http://127.0.0.1:7890"
   });
   assert.equal(options.cookies, "C:\\auth\\youtube-cookies.txt");
   assert.equal(options.cookiesFromBrowser, undefined);
+  assert.equal(options.proxy, "http://127.0.0.1:7890");
   assert.match(options.format, /acodec\^=mp4a/);
   assert.equal(options.jsRuntimes, process.env.CLAUDE_FM_JS_RUNTIME || "node");
 
@@ -98,14 +111,21 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.ok(fallbackOptions.cookies || fallbackOptions.cookiesFromBrowser);
   assert.equal(fallbackOptions.jsRuntimes, process.env.CLAUDE_FM_JS_RUNTIME || "node");
 
-  const args = buildFfmpegArgs({
-    audioCodec: "mp4a.40.2",
-    headers: { Referer: "https://www.youtube.com/" },
-    url: "https://example.com/audio"
-  });
+  const args = buildFfmpegArgs(
+    {
+      audioCodec: "mp4a.40.2",
+      headers: { Referer: "https://www.youtube.com/" },
+      url: "https://example.com/audio"
+    },
+    {
+      proxyUrl: "http://127.0.0.1:7890"
+    }
+  );
 
   assert.ok(args.includes("-headers"));
   assert.ok(args.includes("Referer: https://www.youtube.com/\r\n"));
+  assert.ok(args.includes("-http_proxy"));
+  assert.ok(args.includes("http://127.0.0.1:7890"));
   assert.ok(args.includes("https://example.com/audio"));
   assert.ok(args.includes("-codec:a"));
   assert.ok(args.includes("copy"));
@@ -128,6 +148,21 @@ test("audio stream helpers fall back when auth cookie provider returns nothing",
   });
   assert.ok(options.cookies || options.cookiesFromBrowser);
   assert.equal(options.jsRuntimes, process.env.CLAUDE_FM_JS_RUNTIME || "node");
+});
+
+test("audio stream helpers expose paused live status", () => {
+  const audioInfo = buildAudioInfoFromYtDlpInfo({
+    acodec: "mp4a.40.2",
+    http_headers: { Referer: "https://www.youtube.com/" },
+    is_live: false,
+    live_status: "post_live",
+    title: "Claude FM",
+    url: "https://example.com/audio"
+  });
+
+  assert.equal(audioInfo.liveStatus, "post_live");
+  assert.equal(audioInfo.isLive, false);
+  assert.equal(isPlayableAudioInfo(audioInfo), false);
 });
 
 test("chrome auth converts CDP YouTube and Google cookies to Netscape format", () => {
@@ -267,6 +302,18 @@ test("chrome auth finds the first existing Chrome executable", () => {
   assert.equal(chrome, "chrome.exe");
 });
 
+test("chrome auth passes proxy settings to dedicated Chrome windows", () => {
+  const args = buildChromeArgs({
+    port: 9333,
+    proxyUrl: "http://127.0.0.1:7890",
+    targetUrl: "https://www.youtube.com/"
+  });
+
+  assert.ok(args.includes("--proxy-server=http://127.0.0.1:7890"));
+  assert.ok(args.includes("--remote-debugging-port=9333"));
+  assert.equal(args.at(-1), "https://www.youtube.com/");
+});
+
 test("cookie helpers understand Netscape and request header formats", () => {
   assert.equal(isNetscapeCookieFile("# Netscape HTTP Cookie File\n"), true);
 
@@ -274,6 +321,33 @@ test("cookie helpers understand Netscape and request header formats", () => {
   assert.equal(parsed.get("SID"), "abc=123");
   assert.equal(parsed.get("YSC"), "xyz");
   assert.equal(GENERATED_COOKIE_EXPIRY > Math.floor(Date.now() / 1000), true);
+});
+
+test("settings normalize and persist proxy URLs and volume", async () => {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-fm-settings-test-"));
+  const settingsPath = path.join(dir, "settings.json");
+  configureSettings({ settingsPath });
+
+  assert.deepEqual(await readSettings(), { proxyUrl: "", volume: 20 });
+  assert.equal(normalizeProxyUrl("127.0.0.1:7890"), "http://127.0.0.1:7890");
+  assert.equal(normalizeVolume("37.6"), 38);
+  assert.equal(normalizeVolume(140), 100);
+  assert.equal(normalizeVolume(-8), 0);
+  assert.deepEqual(await writeSettings({ proxyUrl: "127.0.0.1:7890", volume: 42 }), {
+    proxyUrl: "http://127.0.0.1:7890",
+    volume: 42
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, "utf8")), {
+    proxyUrl: "http://127.0.0.1:7890",
+    volume: 42
+  });
+  await assert.rejects(
+    () => writeSettings({ proxyUrl: "socks5://127.0.0.1:7890" }),
+    /http:\/\/.*https:\/\//
+  );
 });
 
 test("audio errors are summarized without raw stderr", () => {
@@ -294,6 +368,12 @@ test("audio errors are summarized without raw stderr", () => {
     }),
     "cookies.txt is no longer valid."
   );
+
+  const pausedLiveError = {
+    stderr: "ERROR: [youtube] YmQ7jRgf4f0: We're experiencing technical difficulties."
+  };
+  assert.equal(isLiveUnavailableError(pausedLiveError), true);
+  assert.equal(summarizeAudioError(pausedLiveError), "Claude FM live stream is paused.");
 });
 
 test("player UI defaults to quiet volume and has buffering/login affordances", () => {
@@ -303,12 +383,16 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   const main = fs.readFileSync("src/main.js", "utf8");
   const preload = fs.readFileSync("src/preload.js", "utf8");
   const renderer = fs.readFileSync("src/renderer.js", "utf8");
+  const settingsHtml = fs.readFileSync("src/settings.html", "utf8");
+  const settingsRenderer = fs.readFileSync("src/settingsRenderer.js", "utf8");
 
   assert.match(html, /id="volumeSlider"[\s\S]*value="20"/);
   assert.match(html, /id="liveLink"[\s\S]*href="https:\/\/www\.youtube\.com\/@claude\/live"[\s\S]*Cloud FM/);
   assert.match(html, /id="volumeIcon"[\s\S]*type="button"/);
   assert.match(html, /id="volumeIcon"[\s\S]*aria-label="静音"/);
   assert.match(html, /id="loginPopover"/);
+  assert.match(html, /id="settingsButton"/);
+  assert.match(html, /data-lucide="settings"/);
   assert.match(html, /已登录 不用重复登录咯~/);
   assert.match(html, /style-src 'self' 'unsafe-inline'/);
   assert.match(html, /vendor\/motion\.js/);
@@ -325,9 +409,17 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /ease: "easeOut"/);
   assert.doesNotMatch(renderer, /times: \[0, 0\.62, 1\]/);
   assert.match(renderer, /lastAudibleVolume = Number\(volumeSlider\.value\) \|\| 20/);
+  assert.match(renderer, /volumeSaveQueue = Promise\.resolve\(\)/);
+  assert.match(renderer, /window\.claudeFm\.saveSettings\(\{ volume \}\)/);
+  assert.match(renderer, /function syncVolume\(\{ save = true \} = \{\}\)/);
+  assert.match(renderer, /function restoreVolume\(\)/);
+  assert.match(renderer, /window\.claudeFm\.getSettings\(\)/);
+  assert.match(renderer, /syncVolume\(\{ save: false \}\)/);
   assert.match(renderer, /function toggleVolumeMute\(\)/);
   assert.match(renderer, /volumeSlider\.value = volume === 0 \? String\(lastAudibleVolume \|\| 20\) : "0"/);
   assert.match(renderer, /volumeIcon\.addEventListener\("click", toggleVolumeMute\)/);
+  assert.match(renderer, /settingsButton\.addEventListener\("click"/);
+  assert.match(renderer, /window\.claudeFm\.openSettings\(\)/);
   assert.match(renderer, /volumeIcon\.setAttribute\("aria-label", isMuted \? "恢复音量" : "静音"\)/);
   assert.match(renderer, /function setLiveLink\(nextVideoId\)/);
   assert.match(renderer, /liveLink\.href = `https:\/\/www\.youtube\.com\/watch\?v=\$\{encodeURIComponent\(nextVideoId\)\}`/);
@@ -335,7 +427,17 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.doesNotMatch(renderer, /\/audio\.mp4/);
   assert.match(renderer, /window\.claudeFm\.preloadAudio\(videoId\)/);
   assert.match(renderer, /正在准备音频/);
+  assert.match(renderer, /preload\.playable === false/);
+  assert.match(renderer, /Claude FM 直播暂停中/);
   assert.match(preload, /preloadAudio: \(videoId\) => ipcRenderer\.invoke\("claude-fm:preload-audio", videoId\)/);
+  assert.match(preload, /openSettings: \(\) => ipcRenderer\.invoke\("claude-fm:open-settings"\)/);
+  assert.match(preload, /saveSettings: \(settings\) => ipcRenderer\.invoke\("claude-fm:save-settings", settings\)/);
+  assert.match(settingsHtml, /id="proxyInput"/);
+  assert.match(settingsHtml, /id="applySettings"/);
+  assert.match(settingsHtml, /id="cancelSettings"/);
+  assert.match(settingsRenderer, /window\.claudeFm\.getSettings\(\)/);
+  assert.match(settingsRenderer, /window\.claudeFm\.saveSettings/);
+  assert.match(settingsRenderer, /window\.claudeFm\.closeSettings\(\)/);
   assert.match(renderer, /showLoggedInPopover/);
   assert.match(renderer, /authNeedsRefresh/);
   assert.match(renderer, /isLoggedIn && !authNeedsRefresh/);
@@ -345,10 +447,26 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /openLogin\(\{\s*forceLogin: authNeedsRefresh\s*\}\)/);
   assert.match(renderer, /播放失败，请重新登录 YouTube/);
   assert.match(main, /AUDIO_INFO_CACHE_MS = 45_000/);
+  assert.match(main, /appSettings = \{ \.\.\.DEFAULT_SETTINGS \}/);
+  assert.match(main, /\.\.\.appSettings,[\s\S]*\.\.\.nextSettings/);
   assert.match(main, /warmAudioInfo\(live\.videoId\)/);
-  assert.match(main, /getAudioInfo\(videoId, \{\s*getCookieFile: ensureAuthCookieFile\s*\}\)/);
+  assert.match(main, /getCookieFile: \(\) => ensureAuthCookieFile\(\{ proxyUrl: appSettings\.proxyUrl \}\)/);
   assert.match(main, /getAudioInfo: loadAudioInfo/);
   assert.match(main, /claude-fm:preload-audio/);
+  assert.match(main, /settings\.html/);
+  assert.match(main, /height: 260/);
+  assert.match(main, /useContentSize: true/);
+  assert.match(main, /center: true/);
+  assert.match(main, /ready-to-show/);
+  assert.match(main, /ipcMain\.handle\("claude-fm:open-settings", \(\) =>/);
+  assert.doesNotMatch(main, /createSettingsWindow\(parent/);
+  assert.doesNotMatch(main, /parent,/);
+  assert.match(main, /session\.defaultSession\.setProxy/);
+  assert.match(main, /net\.fetch/);
+  assert.match(main, /proxyUrl: appSettings\.proxyUrl/);
+  assert.match(main, /playable: isPlayableAudioInfo\(audioInfo\)/);
+  assert.match(main, /isLiveUnavailableError\(error\)/);
+  assert.match(main, /liveStatus: "unavailable"/);
 });
 
 test("package metadata supports Windows builds without committing artifacts", () => {

@@ -3,6 +3,7 @@ const statusText = document.querySelector("#status");
 const audio = document.querySelector("#audio");
 const loginButton = document.querySelector("#loginButton");
 const loginPopover = document.querySelector("#loginPopover");
+const settingsButton = document.querySelector("#settingsButton");
 const liveLink = document.querySelector("#liveLink");
 const volumeIcon = document.querySelector("#volumeIcon");
 const volumeSlider = document.querySelector("#volumeSlider");
@@ -15,6 +16,7 @@ let isLoggedIn = false;
 let authNeedsRefresh = false;
 let bufferAnimation;
 let lastAudibleVolume = Number(volumeSlider.value) || 20;
+let volumeSaveQueue = Promise.resolve();
 
 function renderIcons() {
   window.lucide?.createIcons({ icons: window.lucide.icons });
@@ -87,6 +89,25 @@ function setLiveLink(nextVideoId) {
   liveLink.href = `https://www.youtube.com/watch?v=${encodeURIComponent(nextVideoId)}`;
 }
 
+function getLiveStatusMessage(preload) {
+  if (preload.liveStatus === "is_upcoming") {
+    return "Claude FM 直播还没开始";
+  }
+
+  return "Claude FM 直播暂停中";
+}
+
+function applyPreloadStatus(preload) {
+  if (preload.playable === false) {
+    audioLoadedForVideoId = null;
+    setButton("rotate-cw", "刷新");
+    setStatus(getLiveStatusMessage(preload));
+    return false;
+  }
+
+  return true;
+}
+
 function setIcon(target, iconName) {
   target.textContent = "";
   const icon = document.createElement("i");
@@ -104,19 +125,43 @@ function setVolumeIcon() {
   volumeIcon.title = isMuted ? "恢复音量" : "静音";
 }
 
-function syncVolume() {
+function saveVolumeSetting(volume) {
+  volumeSaveQueue = volumeSaveQueue
+    .catch(() => {})
+    .then(() => window.claudeFm.saveSettings({ volume }))
+    .catch((error) => {
+      console.error(error);
+    });
+}
+
+function syncVolume({ save = true } = {}) {
   const volume = Number(volumeSlider.value);
   audio.volume = volume / 100;
   if (volume > 0) {
     lastAudibleVolume = volume;
   }
   setVolumeIcon();
+
+  if (save) {
+    saveVolumeSetting(volume);
+  }
 }
 
 function toggleVolumeMute() {
   const volume = Number(volumeSlider.value);
   volumeSlider.value = volume === 0 ? String(lastAudibleVolume || 20) : "0";
   syncVolume();
+}
+
+async function restoreVolume() {
+  try {
+    const settings = await window.claudeFm.getSettings();
+    volumeSlider.value = String(settings.volume ?? 20);
+  } catch (error) {
+    console.error(error);
+  }
+
+  syncVolume({ save: false });
 }
 
 function setLoginButton(nextIsLoggedIn) {
@@ -207,7 +252,10 @@ async function resolveLive() {
     setLiveLink(videoId);
     setStatus("正在准备音频");
     try {
-      await window.claudeFm.preloadAudio(videoId);
+      const preload = await window.claudeFm.preloadAudio(videoId);
+      if (!applyPreloadStatus(preload)) {
+        return;
+      }
     } catch (error) {
       console.error(error);
     }
@@ -246,9 +294,19 @@ async function play() {
     return;
   }
 
-  loadAudio(true);
   setButton("loader-circle", "连接中", true);
   setStatus("正在连接音频");
+
+  try {
+    const preload = await window.claudeFm.preloadAudio(videoId);
+    if (!applyPreloadStatus(preload)) {
+      return;
+    }
+  } catch (error) {
+    console.error(error);
+  }
+
+  loadAudio(true);
 
   try {
     await audio.play();
@@ -300,6 +358,9 @@ audio.addEventListener("error", () => {
 
 volumeSlider.addEventListener("input", syncVolume);
 volumeIcon.addEventListener("click", toggleVolumeMute);
+settingsButton.addEventListener("click", () => {
+  window.claudeFm.openSettings();
+});
 loginButton.addEventListener("click", async () => {
   if (isLoggedIn && !authNeedsRefresh) {
     showLoggedInPopover();
@@ -337,7 +398,7 @@ loginButton.addEventListener("click", async () => {
     loginButton.disabled = false;
   }
 });
-syncVolume();
+restoreVolume();
 renderIcons();
 updateAuthStatus();
 resolveLive();

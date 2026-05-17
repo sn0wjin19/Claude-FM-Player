@@ -13,6 +13,7 @@ const AUTH_COOKIE_DOMAIN_SUFFIXES = ["youtube.com", "google.com"];
 let authState = {
   child: null,
   port: null,
+  proxyUrl: "",
   profileDir: process.env.CLAUDE_FM_AUTH_PROFILE_DIR || null
 };
 
@@ -243,6 +244,32 @@ function isAuthChromeRunning() {
   return authState.child && authState.child.exitCode === null && !authState.child.killed;
 }
 
+function buildChromeArgs({ headless = false, port, proxyUrl = "", targetUrl }) {
+  const args = [
+    headless ? "--headless=new" : null,
+    `--remote-debugging-address=127.0.0.1`,
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${getAuthProfileDir()}`,
+    "--profile-directory=Default",
+    "--no-first-run",
+    "--no-default-browser-check",
+    proxyUrl ? `--proxy-server=${proxyUrl}` : null,
+    targetUrl
+  ];
+
+  return args.filter(Boolean);
+}
+
+function clearRunningChromeIfProxyChanged(proxyUrl) {
+  if (!isAuthChromeRunning() || authState.proxyUrl === proxyUrl) {
+    return;
+  }
+
+  authState.child.kill();
+  authState.child = null;
+  authState.port = null;
+}
+
 async function readRunningChromeCookies() {
   if (!isAuthChromeRunning()) {
     return null;
@@ -257,8 +284,9 @@ async function readRunningChromeCookies() {
   }
 }
 
-async function openLoginWindow({ forceLogin = false } = {}) {
+async function openLoginWindow({ forceLogin = false, proxyUrl = "" } = {}) {
   fs.mkdirSync(getAuthProfileDir(), { recursive: true });
+  clearRunningChromeIfProxyChanged(proxyUrl);
 
   if (isAuthChromeRunning()) {
     try {
@@ -290,15 +318,11 @@ async function openLoginWindow({ forceLogin = false } = {}) {
   const status = readStoredAuthStatus();
   const child = spawn(
     chromePath,
-    [
-      `--remote-debugging-address=127.0.0.1`,
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${getAuthProfileDir()}`,
-      "--profile-directory=Default",
-      "--no-first-run",
-      "--no-default-browser-check",
-      getLoginUrlForStatus(status.isLoggedIn, { forceLogin })
-    ],
+    buildChromeArgs({
+      port,
+      proxyUrl,
+      targetUrl: getLoginUrlForStatus(status.isLoggedIn, { forceLogin })
+    }),
     {
       detached: true,
       stdio: "ignore",
@@ -309,6 +333,7 @@ async function openLoginWindow({ forceLogin = false } = {}) {
   child.unref();
   authState.child = child;
   authState.port = port;
+  authState.proxyUrl = proxyUrl;
 
   const cookies = await readRunningChromeCookies();
   if (cookies) {
@@ -323,7 +348,7 @@ async function openLoginWindow({ forceLogin = false } = {}) {
   };
 }
 
-async function exportCookiesWithTemporaryChrome() {
+async function exportCookiesWithTemporaryChrome({ proxyUrl = "" } = {}) {
   fs.mkdirSync(getAuthProfileDir(), { recursive: true });
 
   const chromePath = findChromeExecutable();
@@ -334,16 +359,12 @@ async function exportCookiesWithTemporaryChrome() {
   const port = await getFreePort();
   const child = spawn(
     chromePath,
-    [
-      "--headless=new",
-      `--remote-debugging-address=127.0.0.1`,
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${getAuthProfileDir()}`,
-      "--profile-directory=Default",
-      "--no-first-run",
-      "--no-default-browser-check",
-      YOUTUBE_LOGIN_URL
-    ],
+    buildChromeArgs({
+      headless: true,
+      port,
+      proxyUrl,
+      targetUrl: YOUTUBE_LOGIN_URL
+    }),
     {
       stdio: "ignore",
       windowsHide: true
@@ -358,7 +379,7 @@ async function exportCookiesWithTemporaryChrome() {
   }
 }
 
-async function ensureAuthCookieFile() {
+async function ensureAuthCookieFile({ proxyUrl = "" } = {}) {
   const storedStatus = readStoredAuthStatus();
   if (storedStatus.isLoggedIn) {
     return getAuthCookieFile();
@@ -370,7 +391,7 @@ async function ensureAuthCookieFile() {
     return writeAuthCookieFile(cookies);
   }
 
-  return exportCookiesWithTemporaryChrome();
+  return exportCookiesWithTemporaryChrome({ proxyUrl });
 }
 
 async function refreshAuthStatus() {
@@ -386,6 +407,7 @@ async function refreshAuthStatus() {
 }
 
 module.exports = {
+  buildChromeArgs,
   COOKIE_EXPIRY_FALLBACK,
   chromeCookiesToNetscape,
   configureChromeAuth,

@@ -30,7 +30,7 @@ body {
 .controls {
   align-items: center;
   display: flex;
-  gap: 14px;
+  gap: 10px;
 }
 
 .play-toggle {
@@ -99,6 +99,13 @@ body {
 .icon-button svg {
   height: 18px;
   width: 18px;
+}
+
+.utility-buttons {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 .play-toggle:disabled {
@@ -172,7 +179,7 @@ body {
   accent-color: #1f1d1a;
   cursor: pointer;
   height: 24px;
-  width: 108px;
+  width: 96px;
 }
 
 .pixel-popover {
@@ -211,4 +218,110 @@ audio {
   position: absolute;
   top: -9999px;
   width: 1px;
+}
+
+.settings-page {
+  background: #f6f1e8;
+  color: #1d1c19;
+  overflow: hidden;
+}
+
+.settings-shell {
+  background: linear-gradient(135deg, #f6f1e8 0%, #f1e6d0 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100vh;
+  padding: 18px;
+}
+
+.settings-header h1 {
+  font-size: 18px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-field span {
+  color: #4f493f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settings-input {
+  background: #fffaf0;
+  border: 2px solid rgba(31, 29, 26, 0.34);
+  border-radius: 6px;
+  color: #1d1c19;
+  font: inherit;
+  font-size: 13px;
+  height: 36px;
+  outline: none;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.settings-input:focus {
+  border-color: #1f1d1a;
+  box-shadow: 0 0 0 2px rgba(31, 29, 26, 0.12);
+}
+
+.settings-hint,
+.settings-status {
+  color: #71695f;
+  font-size: 12px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.settings-status {
+  min-height: 15px;
+}
+
+.settings-status[data-kind="error"] {
+  color: #a23b2a;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.settings-button {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  height: 34px;
+  letter-spacing: 0;
+  min-width: 76px;
+  padding: 0 14px;
+}
+
+.settings-button.primary {
+  background: #1f1d1a;
+  color: #fffaf0;
+}
+
+.settings-button.secondary {
+  background: rgba(31, 29, 26, 0.1);
+  color: #4f493f;
+}
+
+.settings-button:hover {
+  filter: brightness(0.96);
+}
+
+.settings-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
