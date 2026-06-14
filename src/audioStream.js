@@ -164,8 +164,6 @@ function buildFfmpegArgs(audioInfo, { proxyUrl } = {}) {
     "error",
     "-reconnect",
     "1",
-    "-reconnect_at_eof",
-    "1",
     "-reconnect_on_network_error",
     "1",
     "-reconnect_on_http_error",
@@ -188,10 +186,15 @@ function buildFfmpegArgs(audioInfo, { proxyUrl } = {}) {
     args.push("-http_proxy", proxyUrl);
   }
 
+  if (audioInfo.isLive || audioInfo.liveStatus === "is_live") {
+    args.push("-live_start_index", "-3");
+  }
+
   args.push(
     "-i",
     audioInfo.url,
-    "-vn",
+    "-map",
+    "0:a:0",
     "-f",
     "adts",
     "-codec:a",

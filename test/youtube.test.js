@@ -43,6 +43,13 @@ const {
   readSettings,
   writeSettings
 } = require("../src/settings");
+const {
+  getAutoProxyUrl,
+  getEffectiveProxyUrl,
+  getEnvProxyUrl,
+  getWindowsProxyUrl,
+  parseWindowsProxyServer
+} = require("../src/proxy");
 
 test("extractVideoId reads common YouTube URL shapes", () => {
   assert.equal(extractVideoId("https://www.youtube.com/watch?v=abcdefghijk"), "abcdefghijk");
@@ -134,6 +141,8 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
     {
       audioCodec: "mp4a.40.2",
       headers: { Referer: "https://www.youtube.com/" },
+      isLive: true,
+      liveStatus: "is_live",
       url: "https://example.com/audio"
     },
     {
@@ -145,9 +154,13 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.ok(args.includes("Referer: https://www.youtube.com/\r\n"));
   assert.ok(args.includes("-http_proxy"));
   assert.ok(args.includes("http://127.0.0.1:7890"));
-  assert.ok(args.includes("-reconnect_at_eof"));
+  assert.equal(args.includes("-reconnect_at_eof"), false);
   assert.ok(args.includes("-reconnect_on_network_error"));
   assert.ok(args.includes("-reconnect_on_http_error"));
+  assert.ok(args.includes("-live_start_index"));
+  assert.ok(args.includes("-3"));
+  assert.ok(args.includes("-map"));
+  assert.ok(args.includes("0:a:0"));
   assert.ok(args.includes("https://example.com/audio"));
   assert.ok(args.includes("-codec:a"));
   assert.ok(args.includes("copy"));
@@ -156,6 +169,7 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.equal(args.includes("-movflags"), false);
   assert.equal(args.includes("libmp3lame"), false);
   assert.ok(args.includes("pipe:1"));
+  assert.equal(args.includes("-vn"), false);
   assert.match(resolveFfmpegPath(), /ffmpeg/i);
   assert.match(resolveYtDlpPath(), /yt-dlp/i);
   assert.deepEqual(FFMPEG_RETRY_DELAYS_MS, [600, 1400, 2800, 5000]);
@@ -377,6 +391,48 @@ test("settings normalize and persist proxy URLs and volume", async () => {
   );
 });
 
+test("proxy helpers prefer explicit, environment, then Windows system proxy", () => {
+  assert.equal(getEnvProxyUrl({ HTTPS_PROXY: "127.0.0.1:7890" }), "http://127.0.0.1:7890");
+  assert.equal(getEnvProxyUrl({ HTTPS_PROXY: "socks5://127.0.0.1:7890" }), "");
+  assert.equal(parseWindowsProxyServer("127.0.0.1:7890"), "http://127.0.0.1:7890");
+  assert.equal(
+    parseWindowsProxyServer("http=127.0.0.1:7890;https=127.0.0.1:7891"),
+    "http://127.0.0.1:7891"
+  );
+
+  const execFileSyncImpl = (_command, args) => {
+    const valueName = args.at(-1);
+    if (valueName === "ProxyEnable") {
+      return "ProxyEnable    REG_DWORD    0x1";
+    }
+    if (valueName === "ProxyServer") {
+      return "ProxyServer    REG_SZ    127.0.0.1:7890";
+    }
+    return "";
+  };
+
+  assert.equal(
+    getWindowsProxyUrl({ platform: "win32", execFileSyncImpl }),
+    "http://127.0.0.1:7890"
+  );
+  assert.equal(
+    getAutoProxyUrl({
+      env: { HTTP_PROXY: "127.0.0.1:7892" },
+      platform: "win32",
+      execFileSyncImpl
+    }),
+    "http://127.0.0.1:7892"
+  );
+  assert.equal(
+    getEffectiveProxyUrl("127.0.0.1:7893", {
+      env: { HTTP_PROXY: "127.0.0.1:7892" },
+      platform: "win32",
+      execFileSyncImpl
+    }),
+    "http://127.0.0.1:7893"
+  );
+});
+
 test("audio errors are summarized without raw stderr", () => {
   const summary = summarizeAudioError({
     stderr: "ERROR: 'cookies.txt' does not look like a Netscape format cookies file\nSECRET=do-not-print"
@@ -489,7 +545,7 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(main, /appSettings = \{ \.\.\.DEFAULT_SETTINGS \}/);
   assert.match(main, /\.\.\.appSettings,[\s\S]*\.\.\.nextSettings/);
   assert.match(main, /warmAudioInfo\(live\.videoId\)/);
-  assert.match(main, /getCookieFile: \(\) => ensureAuthCookieFile\(\{ proxyUrl: appSettings\.proxyUrl \}\)/);
+  assert.match(main, /getCookieFile: \(\) => ensureAuthCookieFile\(\{ proxyUrl \}\)/);
   assert.match(main, /getAudioInfo: loadAudioInfo/);
   assert.match(main, /claude-fm:preload-audio/);
   assert.match(main, /settings\.html/);
@@ -501,8 +557,9 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.doesNotMatch(main, /createSettingsWindow\(parent/);
   assert.doesNotMatch(main, /parent,/);
   assert.match(main, /session\.defaultSession\.setProxy/);
+  assert.match(main, /getEffectiveProxyUrl/);
   assert.match(main, /net\.fetch/);
-  assert.match(main, /proxyUrl: appSettings\.proxyUrl/);
+  assert.match(main, /function getAppProxyUrl\(\)/);
   assert.match(main, /playable: isPlayableAudioInfo\(audioInfo\)/);
   assert.match(main, /isLiveUnavailableError\(error\)/);
   assert.match(main, /liveStatus: "unavailable"/);

@@ -25,6 +25,7 @@ const {
   readSettings,
   writeSettings
 } = require("./settings");
+const { getEffectiveProxyUrl } = require("./proxy");
 const {
   CLAUDE_LIVE_URL,
   extractVideoId,
@@ -63,6 +64,7 @@ const AUDIO_INFO_CACHE_MS = 45_000;
 let staticServer;
 let currentAppOrigin;
 let appSettings = { ...DEFAULT_SETTINGS };
+let effectiveProxyUrl = "";
 let settingsWindow;
 const audioInfoCache = new Map();
 
@@ -73,7 +75,7 @@ function getSettingsPath() {
 function getProxyConfig(proxyUrl) {
   if (!proxyUrl) {
     return {
-      proxyRules: "direct://"
+      mode: "system"
     };
   }
 
@@ -85,8 +87,13 @@ function getProxyConfig(proxyUrl) {
 
 async function applyProxySettings(settings) {
   appSettings = normalizeSettings(settings);
+  effectiveProxyUrl = getEffectiveProxyUrl(appSettings.proxyUrl);
   audioInfoCache.clear();
-  await session.defaultSession.setProxy(getProxyConfig(appSettings.proxyUrl));
+  await session.defaultSession.setProxy(getProxyConfig(getAppProxyUrl()));
+}
+
+function getAppProxyUrl() {
+  return appSettings.proxyUrl || effectiveProxyUrl;
 }
 
 function fetchWithAppProxy(url, options) {
@@ -94,9 +101,10 @@ function fetchWithAppProxy(url, options) {
 }
 
 function getAudioOptions() {
+  const proxyUrl = getAppProxyUrl();
   return {
-    getCookieFile: () => ensureAuthCookieFile({ proxyUrl: appSettings.proxyUrl }),
-    proxyUrl: appSettings.proxyUrl
+    getCookieFile: () => ensureAuthCookieFile({ proxyUrl }),
+    proxyUrl
   };
 }
 
@@ -137,7 +145,7 @@ function loadAudioInfo(videoId, { refresh = false } = {}) {
 
 async function resolveLiveWithYtDlp() {
   const audioInfo = await getAudioInfoForUrl(CLAUDE_LIVE_URL, {
-    proxyUrl: appSettings.proxyUrl,
+    proxyUrl: getAppProxyUrl(),
     useBrowserCookies: false
   });
   const videoId = audioInfo.videoId || extractVideoId(audioInfo.sourceUrl);
@@ -202,7 +210,7 @@ function startStaticServer() {
       try {
         await streamAudio(videoId, response, {
           getAudioInfo: loadAudioInfo,
-          proxyUrl: appSettings.proxyUrl
+          proxyUrl: getAppProxyUrl()
         });
       } catch (error) {
         console.error(summarizeAudioError(error));
@@ -388,7 +396,7 @@ ipcMain.handle("claude-fm:preload-audio", async (_event, videoId) => {
 ipcMain.handle("claude-fm:open-login", async (_event, options = {}) => {
   return openLoginWindow({
     ...options,
-    proxyUrl: appSettings.proxyUrl
+    proxyUrl: getAppProxyUrl()
   });
 });
 
