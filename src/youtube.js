@@ -36,6 +36,31 @@ function extractVideoIdFromHtml(html) {
     }
   }
 
+  const liveMarkers = [
+    '"liveBroadcastDetails"',
+    '"isLiveNow"',
+    '"thumbnailOverlayTimeStatusRenderer"'
+  ];
+  for (const marker of liveMarkers) {
+    const markerIndex = html.indexOf(marker);
+    if (markerIndex < 0) {
+      continue;
+    }
+
+    const start = Math.max(0, markerIndex - 5000);
+    const end = Math.min(html.length, markerIndex + 5000);
+    const liveData = html.slice(start, end);
+    const liveVideoMatches = [...liveData.matchAll(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/g)];
+    if (liveVideoMatches.length > 0) {
+      liveVideoMatches.sort(
+        (left, right) =>
+          Math.abs(start + left.index - markerIndex) -
+          Math.abs(start + right.index - markerIndex)
+      );
+      return liveVideoMatches[0][1];
+    }
+  }
+
   const patterns = [
     /<link[^>]+rel=["']canonical["'][^>]+href=["']https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})["']/i,
     /<meta[^>]+property=["']og:url["'][^>]+content=["']https:\/\/www\.youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})["']/i,

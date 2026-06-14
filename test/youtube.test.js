@@ -10,6 +10,7 @@ const {
   buildFfmpegArgs,
   buildWatchUrl,
   buildAudioInfoFromYtDlpInfo,
+  FFMPEG_RETRY_DELAYS_MS,
   getYtDlpOptions,
   isPlayableAudioInfo,
   isLiveUnavailableError,
@@ -64,6 +65,16 @@ test("extractVideoIdFromHtml reads the current live endpoint before prefetch ids
   assert.equal(extractVideoIdFromHtml(html), "current1234");
 });
 
+test("extractVideoIdFromHtml prefers live video data before generic recommendations", () => {
+  const html = [
+    '{"videoId":"prefetch123"}',
+    '{"videoRenderer":{"videoId":"liveVideo99","badges":[{"metadataBadgeRenderer":{"label":"LIVE"}}],',
+    '"liveBroadcastDetails":{"isLiveNow":true}}}'
+  ].join("");
+
+  assert.equal(extractVideoIdFromHtml(html), "liveVideo99");
+});
+
 test("resolveClaudeLiveVideoId uses the final redirected URL first", async () => {
   const result = await resolveClaudeLiveVideoId({
     fetchImpl: async () => ({
@@ -111,6 +122,14 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.ok(fallbackOptions.cookies || fallbackOptions.cookiesFromBrowser);
   assert.equal(fallbackOptions.jsRuntimes, process.env.CLAUDE_FM_JS_RUNTIME || "node");
 
+  const publicOptions = await getYtDlpOptions({
+    proxyUrl: "http://127.0.0.1:7890",
+    useBrowserCookies: false
+  });
+  assert.equal(publicOptions.cookies, undefined);
+  assert.equal(publicOptions.cookiesFromBrowser, undefined);
+  assert.equal(publicOptions.proxy, "http://127.0.0.1:7890");
+
   const args = buildFfmpegArgs(
     {
       audioCodec: "mp4a.40.2",
@@ -126,6 +145,9 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.ok(args.includes("Referer: https://www.youtube.com/\r\n"));
   assert.ok(args.includes("-http_proxy"));
   assert.ok(args.includes("http://127.0.0.1:7890"));
+  assert.ok(args.includes("-reconnect_at_eof"));
+  assert.ok(args.includes("-reconnect_on_network_error"));
+  assert.ok(args.includes("-reconnect_on_http_error"));
   assert.ok(args.includes("https://example.com/audio"));
   assert.ok(args.includes("-codec:a"));
   assert.ok(args.includes("copy"));
@@ -136,6 +158,7 @@ test("audio stream helpers build yt-dlp and ffmpeg inputs", async () => {
   assert.ok(args.includes("pipe:1"));
   assert.match(resolveFfmpegPath(), /ffmpeg/i);
   assert.match(resolveYtDlpPath(), /yt-dlp/i);
+  assert.deepEqual(FFMPEG_RETRY_DELAYS_MS, [600, 1400, 2800, 5000]);
   assert.equal(
     resolveAsarUnpackedPath("C:\\app\\resources\\app.asar\\node_modules\\tool\\bin.exe"),
     "C:\\app\\resources\\app.asar.unpacked\\node_modules\\tool\\bin.exe"
@@ -154,12 +177,16 @@ test("audio stream helpers expose paused live status", () => {
   const audioInfo = buildAudioInfoFromYtDlpInfo({
     acodec: "mp4a.40.2",
     http_headers: { Referer: "https://www.youtube.com/" },
+    id: "liveVideo99",
     is_live: false,
     live_status: "post_live",
+    webpage_url: "https://www.youtube.com/watch?v=liveVideo99",
     title: "Claude FM",
     url: "https://example.com/audio"
   });
 
+  assert.equal(audioInfo.videoId, "liveVideo99");
+  assert.equal(audioInfo.sourceUrl, "https://www.youtube.com/watch?v=liveVideo99");
   assert.equal(audioInfo.liveStatus, "post_live");
   assert.equal(audioInfo.isLive, false);
   assert.equal(isPlayableAudioInfo(audioInfo), false);
@@ -387,6 +414,7 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   const settingsRenderer = fs.readFileSync("src/settingsRenderer.js", "utf8");
 
   assert.match(html, /id="volumeSlider"[\s\S]*value="20"/);
+  assert.match(html, /<audio id="audio" preload="auto"><\/audio>/);
   assert.match(html, /id="liveLink"[\s\S]*href="https:\/\/www\.youtube\.com\/@claude\/live"[\s\S]*Cloud FM/);
   assert.match(html, /id="volumeIcon"[\s\S]*type="button"/);
   assert.match(html, /id="volumeIcon"[\s\S]*aria-label="静音"/);
@@ -409,6 +437,13 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /ease: "easeOut"/);
   assert.doesNotMatch(renderer, /times: \[0, 0\.62, 1\]/);
   assert.match(renderer, /lastAudibleVolume = Number\(volumeSlider\.value\) \|\| 20/);
+  assert.match(renderer, /STREAM_RETRY_DELAYS_MS = \[1000, 2500, 5000, 8000\]/);
+  assert.match(renderer, /BUFFER_RECOVERY_MS = 12000/);
+  assert.match(renderer, /function scheduleStreamRetry\(reason\)/);
+  assert.match(renderer, /function scheduleBufferRecovery\(\)/);
+  assert.match(renderer, /audio\.addEventListener\("stalled"/);
+  assert.match(renderer, /audio\.addEventListener\("ended"/);
+  assert.match(renderer, /suppressPauseEvent/);
   assert.match(renderer, /volumeSaveQueue = Promise\.resolve\(\)/);
   assert.match(renderer, /window\.claudeFm\.saveSettings\(\{ volume \}\)/);
   assert.match(renderer, /function syncVolume\(\{ save = true \} = \{\}\)/);
@@ -447,6 +482,10 @@ test("player UI defaults to quiet volume and has buffering/login affordances", (
   assert.match(renderer, /openLogin\(\{\s*forceLogin: authNeedsRefresh\s*\}\)/);
   assert.match(renderer, /播放失败，请重新登录 YouTube/);
   assert.match(main, /AUDIO_INFO_CACHE_MS = 45_000/);
+  assert.match(main, /resolveLiveWithYtDlp/);
+  assert.match(main, /getAudioInfoForUrl\(CLAUDE_LIVE_URL/);
+  assert.match(main, /useBrowserCookies: false/);
+  assert.match(main, /setCachedAudioInfo\(videoId, audioInfo\)/);
   assert.match(main, /appSettings = \{ \.\.\.DEFAULT_SETTINGS \}/);
   assert.match(main, /\.\.\.appSettings,[\s\S]*\.\.\.nextSettings/);
   assert.match(main, /warmAudioInfo\(live\.videoId\)/);

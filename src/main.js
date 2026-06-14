@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 const {
+  getAudioInfoForUrl,
   getAudioInfo,
   isLiveUnavailableError,
   isPlayableAudioInfo,
@@ -24,7 +25,11 @@ const {
   readSettings,
   writeSettings
 } = require("./settings");
-const { resolveClaudeLiveVideoId } = require("./youtube");
+const {
+  CLAUDE_LIVE_URL,
+  extractVideoId,
+  resolveClaudeLiveVideoId
+} = require("./youtube");
 
 const STATIC_ROOT = __dirname;
 const APP_ICON = path.join(__dirname, "..", "assets", "icon.png");
@@ -88,23 +93,31 @@ function fetchWithAppProxy(url, options) {
   return net.fetch(url, options);
 }
 
-function loadAudioInfo(videoId) {
+function getAudioOptions() {
+  return {
+    getCookieFile: () => ensureAuthCookieFile({ proxyUrl: appSettings.proxyUrl }),
+    proxyUrl: appSettings.proxyUrl
+  };
+}
+
+function setCachedAudioInfo(videoId, audioInfo) {
+  audioInfoCache.set(videoId, {
+    expiresAt: Date.now() + AUDIO_INFO_CACHE_MS,
+    promise: Promise.resolve(audioInfo)
+  });
+}
+
+function loadAudioInfo(videoId, { refresh = false } = {}) {
   const now = Date.now();
   const cached = audioInfoCache.get(videoId);
 
-  if (cached && cached.expiresAt > now) {
+  if (!refresh && cached && cached.expiresAt > now) {
     return cached.promise;
   }
 
-  const promise = getAudioInfo(videoId, {
-    getCookieFile: () => ensureAuthCookieFile({ proxyUrl: appSettings.proxyUrl }),
-    proxyUrl: appSettings.proxyUrl
-  })
+  const promise = getAudioInfo(videoId, getAudioOptions())
     .then((audioInfo) => {
-      audioInfoCache.set(videoId, {
-        expiresAt: Date.now() + AUDIO_INFO_CACHE_MS,
-        promise: Promise.resolve(audioInfo)
-      });
+      setCachedAudioInfo(videoId, audioInfo);
       return audioInfo;
     })
     .catch((error) => {
@@ -120,6 +133,39 @@ function loadAudioInfo(videoId) {
   });
 
   return promise;
+}
+
+async function resolveLiveWithYtDlp() {
+  const audioInfo = await getAudioInfoForUrl(CLAUDE_LIVE_URL, {
+    proxyUrl: appSettings.proxyUrl,
+    useBrowserCookies: false
+  });
+  const videoId = audioInfo.videoId || extractVideoId(audioInfo.sourceUrl);
+
+  if (!videoId || !VIDEO_ID_PATTERN.test(videoId)) {
+    throw new Error("yt-dlp did not return an active Claude FM live video.");
+  }
+
+  setCachedAudioInfo(videoId, audioInfo);
+
+  return {
+    videoId,
+    sourceUrl: audioInfo.sourceUrl || `https://www.youtube.com/watch?v=${videoId}`
+  };
+}
+
+async function resolveLive() {
+  const signal = AbortSignal.timeout(15000);
+
+  try {
+    return await resolveClaudeLiveVideoId({
+      fetchImpl: fetchWithAppProxy,
+      signal
+    });
+  } catch (error) {
+    console.error(`Live page lookup failed: ${error.message}`);
+    return resolveLiveWithYtDlp();
+  }
 }
 
 function warmAudioInfo(videoId) {
@@ -307,11 +353,7 @@ function getAuthProfileDir() {
 }
 
 ipcMain.handle("claude-fm:resolve-live", async () => {
-  const signal = AbortSignal.timeout(15000);
-  const live = await resolveClaudeLiveVideoId({
-    fetchImpl: fetchWithAppProxy,
-    signal
-  });
+  const live = await resolveLive();
   warmAudioInfo(live.videoId);
   return live;
 });

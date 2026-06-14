@@ -21,6 +21,7 @@ const LIVE_UNAVAILABLE_ERROR_PATTERNS = [
   "This live event will begin",
   "The live stream is offline"
 ];
+const FFMPEG_RETRY_DELAYS_MS = [600, 1400, 2800, 5000];
 
 function resolveAsarUnpackedPath(filePath) {
   if (!filePath || !filePath.includes(ASAR_SEGMENT)) {
@@ -40,7 +41,11 @@ function buildWatchUrl(videoId) {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
-async function getYtDlpOptions({ getCookieFile, proxyUrl } = {}) {
+async function getYtDlpOptions({
+  getCookieFile,
+  proxyUrl,
+  useBrowserCookies = true
+} = {}) {
   let cookieFile = null;
   let cookieFileError = null;
 
@@ -70,7 +75,7 @@ async function getYtDlpOptions({ getCookieFile, proxyUrl } = {}) {
 
   if (cookieFile) {
     options.cookies = cookieFile;
-  } else {
+  } else if (useBrowserCookies) {
     options.cookiesFromBrowser = EDGE_COOKIES;
   }
 
@@ -87,7 +92,9 @@ function buildAudioInfoFromYtDlpInfo(info) {
     headers: info.http_headers || {},
     isLive: Boolean(info.is_live),
     liveStatus: info.live_status || "",
+    sourceUrl: info.webpage_url || info.original_url || "",
     title: info.title || "Claude FM",
+    videoId: info.id || "",
     url: info.url || ""
   };
 }
@@ -127,8 +134,12 @@ function isLiveUnavailableError(error) {
   return LIVE_UNAVAILABLE_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
-async function getAudioInfo(videoId, options = {}) {
-  const info = await ytdlp(buildWatchUrl(videoId), await getYtDlpOptions(options));
+async function getYtDlpInfo(url, options = {}) {
+  return ytdlp(url, await getYtDlpOptions(options));
+}
+
+async function getAudioInfoForUrl(url, options = {}) {
+  const info = await getYtDlpInfo(url, options);
   const audioInfo = buildAudioInfoFromYtDlpInfo(info);
 
   if (!isPlayableAudioInfo(audioInfo)) {
@@ -142,6 +153,10 @@ async function getAudioInfo(videoId, options = {}) {
   return audioInfo;
 }
 
+async function getAudioInfo(videoId, options = {}) {
+  return getAudioInfoForUrl(buildWatchUrl(videoId), options);
+}
+
 function buildFfmpegArgs(audioInfo, { proxyUrl } = {}) {
   const args = [
     "-hide_banner",
@@ -149,6 +164,12 @@ function buildFfmpegArgs(audioInfo, { proxyUrl } = {}) {
     "error",
     "-reconnect",
     "1",
+    "-reconnect_at_eof",
+    "1",
+    "-reconnect_on_network_error",
+    "1",
+    "-reconnect_on_http_error",
+    "4xx,5xx",
     "-reconnect_streamed",
     "1",
     "-reconnect_delay_max",
@@ -191,35 +212,93 @@ function resolveFfmpegPath() {
   return process.env.CLAUDE_FM_FFMPEG_PATH || resolveAsarUnpackedPath(ffmpegStatic) || "ffmpeg";
 }
 
-async function streamAudio(videoId, response, options = {}) {
+function waitForFfmpeg(ffmpeg, response) {
+  return new Promise((resolve) => {
+    ffmpeg.stdout.on("data", (chunk) => {
+      if (!response.destroyed) {
+        response.write(chunk);
+      }
+    });
+
+    ffmpeg.once("close", (code, signal) => {
+      resolve({ code, signal });
+    });
+
+    ffmpeg.once("error", (error) => {
+      resolve({ error });
+    });
+  });
+}
+
+async function wait(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveStreamAudioInfo(videoId, options, refresh = false) {
   const audioInfo = options.getAudioInfo
-    ? await options.getAudioInfo(videoId)
+    ? await options.getAudioInfo(videoId, { refresh })
     : await getAudioInfo(videoId, options);
+
   if (!isPlayableAudioInfo(audioInfo)) {
     throw createLiveStatusError(audioInfo);
   }
 
-  const ffmpeg = spawn(resolveFfmpegPath(), buildFfmpegArgs(audioInfo, options), {
-    windowsHide: true
-  });
+  return audioInfo;
+}
 
-  response.writeHead(200, {
-    "cache-control": "no-store",
-    "content-type": AUDIO_CONTENT_TYPE
-  });
-
-  ffmpeg.stdout.pipe(response);
-  ffmpeg.stderr.on("data", (chunk) => {
-    console.error(`[ffmpeg] ${chunk.toString().trim()}`);
-  });
+async function streamAudio(videoId, response, options = {}) {
+  let ffmpeg = null;
+  let responseClosed = false;
+  let responseStarted = false;
 
   response.on("close", () => {
+    responseClosed = true;
     killProcess(ffmpeg);
   });
 
-  ffmpeg.on("error", (error) => {
-    console.error(error);
-    response.destroy(error);
+  for (let attempt = 0; attempt <= FFMPEG_RETRY_DELAYS_MS.length; attempt += 1) {
+    const audioInfo = await resolveStreamAudioInfo(videoId, options, attempt > 0);
+    if (responseClosed) {
+      return;
+    }
+
+    ffmpeg = spawn(resolveFfmpegPath(), buildFfmpegArgs(audioInfo, options), {
+      windowsHide: true
+    });
+    attachFfmpegLogging(ffmpeg);
+
+    if (!responseStarted) {
+      response.writeHead(200, {
+        "cache-control": "no-store",
+        "content-type": AUDIO_CONTENT_TYPE
+      });
+      responseStarted = true;
+    }
+
+    const result = await waitForFfmpeg(ffmpeg, response);
+    if (responseClosed) {
+      return;
+    }
+
+    if (result.error) {
+      console.error(result.error);
+    }
+
+    if (attempt >= FFMPEG_RETRY_DELAYS_MS.length) {
+      response.destroy(result.error || new Error("Audio stream ended before the client closed."));
+      return;
+    }
+
+    console.error(
+      `[ffmpeg] stream ended; retrying (${attempt + 1}/${FFMPEG_RETRY_DELAYS_MS.length})`
+    );
+    await wait(FFMPEG_RETRY_DELAYS_MS[attempt]);
+  }
+}
+
+function attachFfmpegLogging(ffmpeg) {
+  ffmpeg.stderr.on("data", (chunk) => {
+    console.error(`[ffmpeg] ${chunk.toString().trim()}`);
   });
 }
 
@@ -263,7 +342,10 @@ module.exports = {
   buildWatchUrl,
   COOKIE_FILE,
   AUDIO_CONTENT_TYPE,
+  FFMPEG_RETRY_DELAYS_MS,
+  getAudioInfoForUrl,
   getAudioInfo,
+  getYtDlpInfo,
   getYtDlpOptions,
   isLiveUnavailableError,
   isPlayableAudioInfo,

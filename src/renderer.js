@@ -8,12 +8,20 @@ const liveLink = document.querySelector("#liveLink");
 const volumeIcon = document.querySelector("#volumeIcon");
 const volumeSlider = document.querySelector("#volumeSlider");
 
+const STREAM_RETRY_DELAYS_MS = [1000, 2500, 5000, 8000];
+const BUFFER_RECOVERY_MS = 12000;
+
 let videoId;
 let audioLoadedForVideoId;
 let loginPollTimer;
 let loginPopoverTimer;
+let streamRetryTimer;
+let bufferRecoveryTimer;
 let isLoggedIn = false;
 let authNeedsRefresh = false;
+let userPaused = false;
+let isRecoveringStream = false;
+let suppressPauseEvent = false;
 let bufferAnimation;
 let lastAudibleVolume = Number(volumeSlider.value) || 20;
 let volumeSaveQueue = Promise.resolve();
@@ -108,6 +116,16 @@ function applyPreloadStatus(preload) {
   return true;
 }
 
+function clearStreamRetry() {
+  clearTimeout(streamRetryTimer);
+  streamRetryTimer = null;
+}
+
+function clearBufferRecovery() {
+  clearTimeout(bufferRecoveryTimer);
+  bufferRecoveryTimer = null;
+}
+
 function setIcon(target, iconName) {
   target.textContent = "";
   const icon = document.createElement("i");
@@ -190,6 +208,16 @@ function markAuthNeedsRefresh() {
   setLoginButton(false);
 }
 
+function markStreamFailed() {
+  isRecoveringStream = false;
+  clearStreamRetry();
+  clearBufferRecovery();
+  audioLoadedForVideoId = null;
+  markAuthNeedsRefresh();
+  setButton("rotate-cw", "重试");
+  setStatus("播放失败，请重新登录 YouTube");
+}
+
 function showLoggedInPopover() {
   loginPopover.hidden = false;
   clearTimeout(loginPopoverTimer);
@@ -269,6 +297,10 @@ async function resolveLive() {
 }
 
 function stopAudioStream() {
+  userPaused = true;
+  isRecoveringStream = false;
+  clearStreamRetry();
+  clearBufferRecovery();
   audio.pause();
   audioLoadedForVideoId = null;
   audio.removeAttribute("src");
@@ -280,12 +312,64 @@ function loadAudio(force = false) {
     return;
   }
 
+  suppressPauseEvent = true;
   audio.pause();
+  queueMicrotask(() => {
+    suppressPauseEvent = false;
+  });
   audio.src = `/audio.mp3?videoId=${encodeURIComponent(videoId)}&t=${Date.now()}`;
   audioLoadedForVideoId = videoId;
 }
 
+function scheduleStreamRetry(reason) {
+  if (userPaused || !videoId) {
+    return false;
+  }
+
+  const attempt = Number(audio.dataset.retryAttempt || "0");
+  if (attempt >= STREAM_RETRY_DELAYS_MS.length) {
+    markStreamFailed();
+    return true;
+  }
+
+  const delay = STREAM_RETRY_DELAYS_MS[attempt];
+  audio.dataset.retryAttempt = String(attempt + 1);
+  isRecoveringStream = true;
+  clearStreamRetry();
+  clearBufferRecovery();
+  setButton("loader-circle", "重连中", true);
+  setStatus(reason === "buffer-timeout" ? "缓冲过久，正在重连" : "连接中断，正在重连");
+
+  streamRetryTimer = setTimeout(async () => {
+    try {
+      loadAudio(true);
+      await audio.play();
+    } catch (error) {
+      console.error(error);
+      scheduleStreamRetry("retry-failed");
+    }
+  }, delay);
+
+  return true;
+}
+
+function scheduleBufferRecovery() {
+  if (userPaused || !videoId) {
+    return;
+  }
+
+  clearBufferRecovery();
+  bufferRecoveryTimer = setTimeout(() => {
+    if (!userPaused && videoId && !audio.paused) {
+      scheduleStreamRetry("buffer-timeout");
+    }
+  }, BUFFER_RECOVERY_MS);
+}
+
 async function play() {
+  userPaused = false;
+  audio.dataset.retryAttempt = "0";
+
   if (!videoId) {
     await resolveLive();
   }
@@ -306,18 +390,19 @@ async function play() {
     console.error(error);
   }
 
+  isRecoveringStream = true;
   loadAudio(true);
 
   try {
     await audio.play();
+    isRecoveringStream = false;
     setButton("pause", "暂停");
     setStatus("正在播放");
   } catch (error) {
     console.error(error);
-    stopAudioStream();
-    markAuthNeedsRefresh();
-    setButton("rotate-cw", "重试");
-    setStatus("播放失败，请重新登录 YouTube");
+    if (!scheduleStreamRetry("play-failed")) {
+      markStreamFailed();
+    }
   }
 }
 
@@ -333,6 +418,11 @@ button.addEventListener("click", () => {
 });
 
 audio.addEventListener("playing", () => {
+  userPaused = false;
+  isRecoveringStream = false;
+  audio.dataset.retryAttempt = "0";
+  clearStreamRetry();
+  clearBufferRecovery();
   authNeedsRefresh = false;
   updateAuthStatus();
   setButton("pause", "暂停");
@@ -342,18 +432,39 @@ audio.addEventListener("playing", () => {
 audio.addEventListener("waiting", () => {
   setButton("loader-circle", "连接中", true);
   setStatus("正在缓冲");
+  scheduleBufferRecovery();
+});
+
+audio.addEventListener("stalled", () => {
+  setButton("loader-circle", "缓冲中", true);
+  setStatus("网络卡顿，正在缓冲");
+  scheduleBufferRecovery();
 });
 
 audio.addEventListener("pause", () => {
+  if (suppressPauseEvent) {
+    return;
+  }
+
+  if (!userPaused && (isRecoveringStream || videoId)) {
+    scheduleStreamRetry("unexpected-pause");
+    return;
+  }
+
   setButton("play", "播放");
   setStatus("已暂停");
 });
 
 audio.addEventListener("error", () => {
   audioLoadedForVideoId = null;
-  markAuthNeedsRefresh();
-  setButton("rotate-cw", "重试");
-  setStatus("播放失败，请重新登录 YouTube");
+  if (!scheduleStreamRetry("stream-error")) {
+    markStreamFailed();
+  }
+});
+
+audio.addEventListener("ended", () => {
+  audioLoadedForVideoId = null;
+  scheduleStreamRetry("stream-ended");
 });
 
 volumeSlider.addEventListener("input", syncVolume);
